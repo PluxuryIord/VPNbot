@@ -3,6 +3,8 @@
 # import uuid
 # import logging
 import datetime
+import secrets
+
 from aiogram import Bot
 
 from config import settings
@@ -11,14 +13,15 @@ from database import db_commands as db
 
 def generate_vless_key(user_id: int, product_name: str) -> str:
     """
-    Генерирует УНИКАЛЬНУЮ, но ТЕСТОВУЮ строку VLess.
-    Добавляем user_id и product_name, чтобы ключи в базе не конфликтовали
-    по unique constraint (если он там есть).
+    Генерирует ТЕСТОВУЮ строку VLESS с ГАРАНТИЕЙ уникальности.
+    Уникальность достигается за счет случайного суффикса.
     """
-    # ИЗМЕНЕНИЕ: Возвращаем всегда пример
-    dummy_key = f"vless://DUMMY-KEY-FOR-{user_id}@{settings.VLESS_SERVER}:{settings.VLESS_PORT}?type=ws&security=tls&sni={settings.VLESS_SNI}#{product_name}"
-
-    # Возвращаем только строку, uuid нам больше не нужен
+    unique_suffix = secrets.token_hex(6)  # 12 hex-символов
+    dummy_key = (
+        f"vless://DUMMY-KEY-FOR-{user_id}-{unique_suffix}"
+        f"@{settings.VLESS_SERVER}:{settings.VLESS_PORT}?type=ws&security=tls&sni={settings.VLESS_SNI}"
+        f"#{product_name}"
+    )
     return dummy_key
 
 
