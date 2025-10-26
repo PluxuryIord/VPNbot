@@ -96,7 +96,8 @@ async def menu_main(callback: CallbackQuery):
 async def menu_buy_select_country(callback: CallbackQuery):
     """Показывает выбор страны."""
     await callback.message.edit_text(
-        "🌍 Выберите страну подключения:",
+        "🌍 Выберите страну подключения:\n"
+        "⚡ Премиум локации с повышенной скоростью",
         reply_markup=get_country_selection_kb()  # Новая клавиатура
     )
     await callback.answer()
