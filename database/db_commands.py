@@ -140,6 +140,28 @@ async def count_user_keys(user_id: int) -> int:
         count = result.scalar_one_or_none()
         return count if count is not None else 0
 
+
+
+async def get_key_by_id(key_id: int):
+    """Получает один ключ по его ID."""
+    async with AsyncSessionLocal() as session:
+        stmt = select(Keys).where(Keys.c.id == key_id)
+        result = await session.execute(stmt)
+        return result.fetchone()
+
+
+async def update_key_expiry(key_id: int, new_expires_at: datetime.datetime):
+    """Обновляет дату истечения срока действия ключа."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = (
+                update(Keys)
+                .where(Keys.c.id == key_id)
+                .values(expires_at=new_expires_at)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
 async def get_user_key_by_order_id(order_id: int):
     """Получает ключ по ID заказа"""
     async with AsyncSessionLocal() as session:
@@ -163,3 +185,12 @@ async def get_all_user_ids():
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Users.c.user_id))
         return result.scalars().all()
+
+
+async def delete_order(order_id: int):
+    """Удаляет заказ по ID."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = delete(Orders).where(Orders.c.id == order_id)
+            await session.execute(stmt)
+            await session.commit()

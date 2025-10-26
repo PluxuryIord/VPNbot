@@ -91,13 +91,13 @@ def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size
     # Добавляем кнопки для каждого ключа на странице
     if keys_on_page:
         for key in keys_on_page:
-            status_icon = "✅" if key.expires_at > datetime.datetime.now() else "❌" # Нужен импорт datetime вверху файла
+            status_icon = "✅" if key.expires_at > datetime.datetime.now() else "❌"  # Нужен импорт datetime вверху файла
             # ❗️ Добавим callback_data для детального просмотра (пока заглушка)
             keyboard.append([
                 InlineKeyboardButton(
                     text=f"{status_icon} Ключ (до {key.expires_at.strftime('%d.%m.%Y')})",
-                    # callback_data=f"key_details:{key.id}" # TODO: Добавить обработчик для этого
-                    callback_data="dummy_key_details" # Временно
+                    callback_data=f"key_details:{key.id}:{page}"
+                    # callback_data="key_details"  # Временно
                 )
             ])
 
@@ -112,7 +112,7 @@ def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size
     # Индикатор страницы
     if total_pages > 1:
         nav_row.append(
-            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore") # Кнопка без действия
+            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore")  # Кнопка без действия
         )
     # Кнопка "Вперед"
     if page + 1 < total_pages:
@@ -121,9 +121,22 @@ def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size
         )
 
     if nav_row:
-        keyboard.append(nav_row) # Добавляем ряд с кнопками навигации
+        keyboard.append(nav_row)  # Добавляем ряд с кнопками навигации
 
     # Кнопка "Главное меню"
     keyboard.append([InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")])
 
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_key_details_kb(key_id: int, current_page: int) -> InlineKeyboardMarkup:
+    """Клавиатура для детального просмотра ключа."""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="🔑 Скопировать ключ", callback_data=f"key_copy:{key_id}:{current_page}"),
+            InlineKeyboardButton(text="🔄 Продлить", callback_data=f"key_renew:{key_id}:{current_page}")
+        ],
+        # Обновляем callback_data кнопки Назад
+        [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"mykeys_page:{current_page}")]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
