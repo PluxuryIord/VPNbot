@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, insert, update
-from models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
+from database.models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
 import datetime
 
 engine = create_async_engine(DB_URL)
