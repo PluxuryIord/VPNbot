@@ -1,4 +1,3 @@
-# handlers/admin_handlers.py
 import asyncio
 import logging
 from aiogram import Router, F, Bot
@@ -18,7 +17,7 @@ class IsAdmin(Filter):
 
 
 router = Router()
-router.message.filter(IsAdmin())  # Все хэндлеры в этом роутере - только для админов
+router.message.filter(IsAdmin())
 
 
 # --- FSM для рассылки ---
@@ -35,7 +34,6 @@ async def cmd_admin(message: Message):
                          "/stats - Показать статистику (TODO)")
 
 
-# --- Логика рассылки ---
 @router.message(Command("broadcast"))
 async def start_broadcast(message: Message, state: FSMContext):
     """Начало рассылки"""
@@ -47,20 +45,15 @@ async def start_broadcast(message: Message, state: FSMContext):
 async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
     """Выполняет рассылку"""
     await state.clear()
-
     user_ids = await db.get_all_user_ids()
-
     await message.answer(f"Начинаю рассылку... Всего пользователей: {len(user_ids)}")
-
     success_count = 0
     fail_count = 0
-
     for user_id in user_ids:
         try:
-            # Копируем сообщение со всеми его стилями, фото и т.д.
             await message.copy_to(user_id)
             success_count += 1
-            await asyncio.sleep(0.1)  # Небольшая задержка
+            await asyncio.sleep(0.1)
         except Exception as e:
             fail_count += 1
             logging.warning(f"Failed to send broadcast to {user_id}: {e}")

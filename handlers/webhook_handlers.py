@@ -5,7 +5,6 @@ from aiogram import Bot
 from yookassa.domain.notification import WebhookNotification
 
 from database import db_commands as db
-from utils import issue_key_to_user  # Создадим в шаге 4
 
 
 async def yookassa_webhook_handler(request: web.Request):
@@ -15,7 +14,6 @@ async def yookassa_webhook_handler(request: web.Request):
     bot: Bot = request.app['bot']
 
     try:
-        # Валидация IP не рекомендуется ЮKassa, вместо этого проверяем уведомление
         data = await request.json()
         notification = WebhookNotification(data)
     except Exception as e:
@@ -44,28 +42,17 @@ async def yookassa_webhook_handler(request: web.Request):
             # 3. Обновляем статус заказа
             await db.update_order_status(order_id, payment.id, status='paid')
 
-            # 4. Выдаем ключ пользователю
-            success = await issue_key_to_user(
-                bot=bot,
-                user_id=order.user_id,
-                product_id=order.product_id,
-                order_id=order.id
-            )
-
-            if success:
-                logging.info(f"Successfully issued key for order {order_id}")
-            else:
-                logging.error(f"Failed to issue key for order {order_id}")
-                # TODO: Добавить логику retry или уведомление админу
+            # 4. Inline-flow: ключ НЕ выдаем из вебхука, только отмечаем оплату.
+            # Пользователь получит ключ при нажатии "Проверить оплату" в боте,
+            # где мы отредактируем текущее меню и покажем ключ.
+            logging.info(f"Order {order_id} marked as paid by webhook. Awaiting user check in bot.")
 
         except Exception as e:
             logging.critical(f"Error processing payment {payment.id}: {e}")
-            # Отвечаем 200, чтобы ЮKassa не слала вебхук повторно,
-            # но логируем как CRITICAL, чтобы админ разобрался
             return web.Response(status=200)
 
     elif notification.event == "payment.canceled":
-        # ... обработка отмены (если нужно) ...
+        #обработка отмены
         pass
 
     # Обязательно отвечаем 200 OK

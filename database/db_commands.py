@@ -1,11 +1,9 @@
-# database/db_commands.py
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, insert, update
-from .models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
+from models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
 import datetime
 
-# Создаем асинхронный "движок"
 engine = create_async_engine(DB_URL)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -15,8 +13,6 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
 
-
-# --- Функции для работы с БД ---
 
 async def get_or_create_user(user_id: int, username: str, first_name: str):
     """Добавляет нового пользователя, если его нет"""
@@ -42,10 +38,20 @@ async def get_or_create_user(user_id: int, username: str, first_name: str):
             return False  # False = Уже был
 
 
-async def get_products():
-    """Получает список всех активных тарифов"""
+async def get_products(country: str | None = None):
+    """
+    Получает список тарифов.
+    Если указана страна, фильтрует по ней.
+    """
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Products))
+        stmt = select(Products)
+        if country:
+            # Фильтруем по стране ИЛИ выбираем общие тарифы (где country is NULL)
+            stmt = stmt.where((Products.c.country == country) | (Products.c.country == None))
+        else:
+            # Если страна не указана, показываем все (или только общие? Решай сам)
+            pass # Показываем все
+        result = await session.execute(stmt)
         return result.fetchall()
 
 
@@ -118,6 +124,14 @@ async def get_user_keys(user_id: int):
             select(Keys).where(Keys.c.user_id == user_id).order_by(Keys.c.expires_at.desc())
         )
         return result.fetchall()
+
+async def get_user_key_by_order_id(order_id: int):
+    """Получает ключ по ID заказа"""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Keys).where(Keys.c.order_id == order_id)
+        )
+        return result.fetchone()
 
 
 async def is_admin(user_id: int) -> bool:
