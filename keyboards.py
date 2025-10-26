@@ -58,6 +58,10 @@ def get_instruction_platforms_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💻 Windows", callback_data="instruction:windows"),
                 InlineKeyboardButton(text="🍏 Mac", callback_data="instruction:macos"),
             ],
+            [InlineKeyboardButton(
+                text="⚙️ Настройка исключений",
+                url="https://teletype.in/@coid_siemens/3PPKfFAHxhw"
+            )],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")],
         ]
     )
