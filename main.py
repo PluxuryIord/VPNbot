@@ -38,19 +38,28 @@ async def on_startup(bot: Bot):
             )
             await session.execute(admin_do_nothing_stmt)
             # Добавляем тарифы
-            all_tariffs = [
-                {'name': '30 дней', 'price': 199.0, 'duration_days': 30, 'country': 'Финляндия'},
-                {'name': '60 дней', 'price': 369.0, 'duration_days': 60, 'country': 'Финляндия'},
-                {'name': '90 дней', 'price': 529.0, 'duration_days': 90, 'country': 'Финляндия'},
-                {'name': '30 дней', 'price': 149.0, 'duration_days': 30, 'country': 'Германия'},
-                {'name': '60 дней', 'price': 269.0, 'duration_days': 60, 'country': 'Германия'},
-                {'name': '90 дней', 'price': 379.0, 'duration_days': 90, 'country': 'Германия'},
-                {'name': '30 дней', 'price': 149.0, 'duration_days': 30, 'country': 'Нидерланды'},
-                {'name': '60 дней', 'price': 269.0, 'duration_days': 60, 'country': 'Нидерланды'},
-                {'name': '90 дней', 'price': 379.0, 'duration_days': 90, 'country': 'Нидерланды'},
-            ]
-            # await session.execute(db.Products.delete())
-            await session.execute(insert(db.Products), all_tariffs)
+            check_products = await session.execute(db.select(db.func.count()).select_from(db.Products))
+            products_count = check_products.scalar_one_or_none()
+
+            # Если тарифов нет (count = 0), то добавляем их
+            if products_count == 0:
+                log.info("Таблица Products пуста, добавляю начальные тарифы...")
+                all_tariffs = [
+                    {'name': '30 дней', 'price': 199.0, 'duration_days': 30, 'country': 'Финляндия'},
+                    {'name': '60 дней', 'price': 369.0, 'duration_days': 60, 'country': 'Финляндия'},
+                    {'name': '90 дней', 'price': 529.0, 'duration_days': 90, 'country': 'Финляндия'},
+                    {'name': '30 дней', 'price': 149.0, 'duration_days': 30, 'country': 'Германия'},
+                    {'name': '60 дней', 'price': 269.0, 'duration_days': 60, 'country': 'Германия'},
+                    {'name': '90 дней', 'price': 379.0, 'duration_days': 90, 'country': 'Германия'},
+                    {'name': '30 дней', 'price': 149.0, 'duration_days': 30, 'country': 'Нидерланды'},
+                    {'name': '60 дней', 'price': 269.0, 'duration_days': 60, 'country': 'Нидерланды'},
+                    {'name': '90 дней', 'price': 379.0, 'duration_days': 90, 'country': 'Нидерланды'},
+                ]
+                # Добавляем новые тарифы
+                await session.execute(insert(db.Products), all_tariffs)
+                log.info("Начальные тарифы добавлены.")
+            else:
+                log.info(f"В таблице Products уже есть {products_count} тарифов. Пропускаю добавление.")
             await session.commit()
     log.info("База данных инициализирована, админ и тарифы добавлены.")
 
