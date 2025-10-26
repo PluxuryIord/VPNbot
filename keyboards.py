@@ -31,8 +31,10 @@ def get_country_selection_kb() -> InlineKeyboardMarkup:
             premium = "⚡"
         elif country == "Германия":
             flag = "🇩🇪"
+            premium = "🔹"
         elif country == "Нидерланды":
             flag = "🇳🇱"
+            premium = "🔹"
         buttons.append(
             InlineKeyboardButton(text=f"{flag} {country} {premium}", callback_data=f"select_country:{country}")
         )
