@@ -1,14 +1,16 @@
 import datetime
 import logging
+import math
+
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.filters import CommandStart
-
+from aiogram.exceptions import AiogramError
 from config import settings
 from utils import issue_key_to_user
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
-    get_country_selection_kb
+    get_country_selection_kb, get_my_keys_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key
@@ -137,43 +139,72 @@ async def select_country_show_tariffs(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "menu:keys")
-async def menu_keys(callback: CallbackQuery):
-    """Показать ключи пользователя (инлайн)."""
-    user_keys = await db.get_user_keys(callback.from_user.id)
-    if not user_keys:
+async def menu_keys_show_first_page(callback: CallbackQuery):
+    """Показывает ПЕРВУЮ страницу ключей пользователя."""
+    await callback.answer() # Снимаем часики
+
+    user_id = callback.from_user.id
+    page = 0 # Всегда начинаем с первой страницы
+    page_size = 5
+
+    total_keys = await db.count_user_keys(user_id)
+    if total_keys == 0:
         await callback.message.edit_text(
             "У вас пока нет купленных ключей.",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]]
+                inline_keyboard=[[InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]]
             ),
         )
         return
 
-    text = "🔑 **Ваши ключи:**\n\n"
-    now = datetime.datetime.now()
-    for i, key in enumerate(user_keys, 1):
-        if key.expires_at > now:
-            status = "✅ *Активен*"
-            remaining = key.expires_at - now
-            time_left = f"{remaining.days} дн. {remaining.seconds // 3600} ч."
-        else:
-            status = "❌ *Истек*"
-            time_left = "0"
-        text += (
-            f"**Ключ #{i}** ({status})\n"
-            f"Истекает: `{key.expires_at.strftime('%Y-%m-%d %H:%M')}`\n"
-            f"Осталось: {time_left}\n"
-            f"```\n{key.vless_key}\n```\n\n"
-        )
+    keys_on_page = await db.get_user_keys(user_id, page=page, page_size=page_size)
+    kb = get_my_keys_kb(keys_on_page, total_keys, page=page, page_size=page_size)
 
-    await callback.message.edit_text(
-        text,
-        parse_mode="Markdown",
-        disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]]
-        ),
-    )
+    total_pages = math.ceil(total_keys / page_size)
+    text = "🔑 **Ваши ключи:**"
+    if total_pages > 1:
+        text += f"\n\n📄 Страница {page + 1} из {total_pages}"
+
+    # Редактируем сообщение, показывая ключи и пагинацию
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+
+
+@router.callback_query(F.data.startswith("mykeys_page:"))
+async def menu_keys_paginate(callback: CallbackQuery):
+    """Обрабатывает нажатия на кнопки пагинации 'Назад'/'Вперед'."""
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        log.warning(f"Некорректный callback_data для пагинации ключей: {callback.data}")
+        await callback.answer("Ошибка навигации.", show_alert=True)
+        return
+
+    await callback.answer() # Снимаем часики
+
+    user_id = callback.from_user.id
+    page_size = 5
+
+    total_keys = await db.count_user_keys(user_id)
+    keys_on_page = await db.get_user_keys(user_id, page=page, page_size=page_size)
+    kb = get_my_keys_kb(keys_on_page, total_keys, page=page, page_size=page_size)
+
+    total_pages = math.ceil(total_keys / page_size)
+    text = "🔑 **Ваши ключи:**"
+    if total_pages > 1:
+        text += f"\n\n📄 Страница {page + 1} из {total_pages}"
+
+    # Редактируем сообщение с новой страницей
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except AiogramError as e:
+        if "message is not modified" in str(e).lower():
+            # Если это ошибка "сообщение не изменено", просто игнорируем
+            pass
+        else:
+            # Если это другая ошибка, логируем ее
+            log.error(f"Ошибка при редактировании сообщения пагинации: {e}")
+            await callback.answer("Произошла ошибка.", show_alert=True)
 
 
 @router.callback_query(F.data.in_({"menu:help", "menu:support"}))

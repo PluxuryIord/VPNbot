@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import select, insert, update
+from sqlalchemy import select, insert, update, func
 from database.models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
 import datetime
 
@@ -117,13 +117,28 @@ async def add_vless_key(user_id: int, order_id: int, vless_key: str, expires_at:
             await session.commit()
 
 
-async def get_user_keys(user_id: int):
-    """Получает все ключи пользователя"""
+async def get_user_keys(user_id: int, page: int = 0, page_size: int = 5): # Добавили page, page_size
+    """Получает ключи пользователя для указанной страницы."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Keys).where(Keys.c.user_id == user_id).order_by(Keys.c.expires_at.desc())
+        offset = page * page_size
+        stmt = (
+            select(Keys)
+            .where(Keys.c.user_id == user_id)
+            .order_by(Keys.c.expires_at.desc())
+            .limit(page_size)
+            .offset(offset)
         )
+        result = await session.execute(stmt)
         return result.fetchall()
+
+
+async def count_user_keys(user_id: int) -> int:
+    """Считает общее количество ключей пользователя."""
+    async with AsyncSessionLocal() as session:
+        stmt = select(func.count()).select_from(Keys).where(Keys.c.user_id == user_id)
+        result = await session.execute(stmt)
+        count = result.scalar_one_or_none()
+        return count if count is not None else 0
 
 async def get_user_key_by_order_id(order_id: int):
     """Получает ключ по ID заказа"""

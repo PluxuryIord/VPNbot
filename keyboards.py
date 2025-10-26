@@ -1,3 +1,6 @@
+import datetime
+import math
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import settings
@@ -77,3 +80,50 @@ def get_payment_kb(payment_url: str, order_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Отмена (к странам)", callback_data="menu:buy")]
         ]
     )
+
+
+def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
+    """
+    Генерирует клавиатуру для 'Мои ключи' с пагинацией.
+    """
+    keyboard = []
+
+    # Добавляем кнопки для каждого ключа на странице
+    if keys_on_page:
+        for key in keys_on_page:
+            status_icon = "✅" if key.expires_at > datetime.datetime.now() else "❌" # Нужен импорт datetime вверху файла
+            # ❗️ Добавим callback_data для детального просмотра (пока заглушка)
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{status_icon} Ключ (до {key.expires_at.strftime('%d.%m.%Y')})",
+                    # callback_data=f"key_details:{key.id}" # TODO: Добавить обработчик для этого
+                    callback_data="dummy_key_details" # Временно
+                )
+            ])
+
+    # --- Кнопки пагинации ---
+    total_pages = math.ceil(total_keys / page_size)
+    nav_row = []
+    # Кнопка "Назад"
+    if page > 0:
+        nav_row.append(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"mykeys_page:{page - 1}")
+        )
+    # Индикатор страницы
+    if total_pages > 1:
+        nav_row.append(
+            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore") # Кнопка без действия
+        )
+    # Кнопка "Вперед"
+    if page + 1 < total_pages:
+        nav_row.append(
+            InlineKeyboardButton(text="Вперед ➡️", callback_data=f"mykeys_page:{page + 1}")
+        )
+
+    if nav_row:
+        keyboard.append(nav_row) # Добавляем ряд с кнопками навигации
+
+    # Кнопка "Главное меню"
+    keyboard.append([InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

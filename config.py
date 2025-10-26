@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # --- Админы (через запятую) ---
     ADMIN_IDS: str
 
+    RUN_MODE: str = 'webhook'
+
     # --- Список серверов X-UI ---
     XUI_SERVERS: List[XuiServer] = []
 
