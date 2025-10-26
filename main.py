@@ -49,7 +49,7 @@ async def on_startup(bot: Bot):
                 {'name': '60 дней', 'price': 269.0, 'duration_days': 60, 'country': 'Нидерланды'},
                 {'name': '90 дней', 'price': 379.0, 'duration_days': 90, 'country': 'Нидерланды'},
             ]
-            await session.execute(db.Products.delete())
+            # await session.execute(db.Products.delete())
             await session.execute(insert(db.Products), all_tariffs)
             await session.commit()
     log.info("База данных инициализирована, админ и тарифы добавлены.")
