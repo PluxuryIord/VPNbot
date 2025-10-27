@@ -92,7 +92,7 @@ def get_payment_method_kb(order_id: int, country: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Картой / ЮMoney", callback_data=f"pay_method:default:{order_id}")],
-            [InlineKeyboardButton(text="⚡ Система Быстрых Платежей (СБП)", callback_data=f"pay_method:sbp:{order_id}")],
+            # [InlineKeyboardButton(text="⚡ Система Быстрых Платежей (СБП)", callback_data=f"pay_method:sbp:{order_id}")],
             # Кнопка отмены, чтобы вернуться к выбору тарифа
             [InlineKeyboardButton(text="⬅️ Назад к тарифам", callback_data=f"select_country:{country}")]
         ]
