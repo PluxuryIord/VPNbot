@@ -13,7 +13,7 @@ from handlers import user_handlers, admin_handlers, webhook_handlers
 
 TELEGRAM_WEBHOOK_PATH = "/webhook/telegram"
 YOOKASSA_WEBHOOK_PATH = settings.WEBHOOK_PATH
-APP_HOST = "0.0.0.0"
+APP_HOST = "127.0.0.1"
 APP_PORT = 8080
 
 log = logging.getLogger(__name__)
