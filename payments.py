@@ -37,7 +37,7 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
         # ⬇️ ⬇️ ⬇️ ВОТ ИЗМЕНЕНИЕ ⬇️ ⬇️ ⬇️
         "receipt": {
             "customer": {
-
+                "email": f"adelchik022005@gmail.com.com"
             },
             "items": [
                 {
