@@ -26,12 +26,32 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
             "currency": "RUB"
         },
         "confirmation": {
+
             "type": "redirect",
             "return_url": f"https://t.me/{settings.BOT_USERNAME}"
         },
         "capture": True,
         "description": description,
-        "metadata": payment_metadata
+        "metadata": payment_metadata,
+
+        # ⬇️ ⬇️ ⬇️ ВОТ ИЗМЕНЕНИЕ ⬇️ ⬇️ ⬇️
+        "receipt": {
+            "customer": {
+
+            },
+            "items": [
+                {
+                    "description": description,  #
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{amount:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": "6"
+                }
+            ],
+            "send": False
+        }
     }
 
     payment = Payment.create(payment_data, idempotence_key)
