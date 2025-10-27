@@ -136,8 +136,18 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
 
     # --- Если НЕ УДАЛОСЬ (уже получал или ошибка) ---
     else:
-        error_message = result_data # Функция вернула текст ошибки
-        await callback.answer(error_message, show_alert=True)
+        error_message = result_data  # Функция вернула текст ошибки
+        if error_message == "Вы уже активировали пробный период.":
+            # Отправляем сообщение в чат вместо alert'а
+            await callback.message.answer(
+                "⏳ **Вы уже использовали пробный период.**\n\n"
+                "Чтобы продолжить пользоваться VPN, пожалуйста, выберите и оплатите один из наших тарифов в главном меню (кнопка \"🛒 Купить VPN\").",
+                parse_mode="Markdown"
+            )
+            await callback.answer()  # Просто закрываем часики
+        else:
+            # Для других ошибок показываем alert
+            await callback.answer(error_message, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("select_country:"))
