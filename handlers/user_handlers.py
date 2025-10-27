@@ -516,7 +516,6 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
     )
 
     # 2. Показываем ВЫБОР СПОСОБА ОПЛАТЫ
-    # (Импорт get_payment_method_kb должен быть вверху файла)
     kb = get_payment_method_kb(order_id, country)
 
     try:
