@@ -221,3 +221,32 @@ async def mark_trial_received(user_id: int):
             )
             await session.execute(stmt)
             await session.commit()
+
+
+async def get_all_active_keys_details():
+    """
+    Получает детальную информацию по всем АКТИВНЫМ ключам.
+    Джойнит Keys, Users, Orders, Products.
+    Учитывает пробные ключи (где order_id is None).
+    """
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+
+        stmt = (
+            select(
+                Keys.c.vless_key,
+                Keys.c.expires_at,
+                Users.c.user_id,
+                Users.c.first_name,
+                Products.c.name.label("product_name"),
+                Products.c.duration_days
+            )
+            .join(Users, Keys.c.user_id == Users.c.user_id)
+            .outerjoin(Orders, Keys.c.order_id == Orders.c.id)
+            .outerjoin(Products, Orders.c.product_id == Products.c.id)
+            .where(Keys.c.expires_at > now)  # Выбираем только активные ключи
+            .order_by(Keys.c.expires_at.asc())  # Сначала те, что скоро истекут
+        )
+
+        result = await session.execute(stmt)
+        return result.fetchall()

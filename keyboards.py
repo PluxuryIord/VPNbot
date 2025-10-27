@@ -6,18 +6,18 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import settings
 
 
-def get_main_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
-            [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
-            [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
-            [
-                InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
-                InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
-            ],
-        ]
-    )
+# def get_main_menu_kb() -> InlineKeyboardMarkup:
+#     return InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
+#             [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
+#             [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
+#             [
+#                 InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
+#                 InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
+#             ],
+#         ]
+#     )
 
 
 def get_country_selection_kb() -> InlineKeyboardMarkup:
@@ -160,4 +160,81 @@ def get_support_kb() -> InlineKeyboardMarkup:
         # Кнопка "Назад"
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_admin_menu_kb() -> InlineKeyboardMarkup:
+    """Главное меню админа."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+            [InlineKeyboardButton(text="📣 Рассылка", callback_data="admin:broadcast")],
+            [InlineKeyboardButton(text="⬅️ Назад в главное меню", callback_data="menu:main")]
+        ]
+    )
+
+
+def get_back_to_admin_kb() -> InlineKeyboardMarkup:
+    """Кнопка 'Назад' для админ-панели."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в админ-меню", callback_data="admin:main")]
+        ]
+    )
+
+
+def get_main_menu_kb(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Генерирует главное меню.
+    Для админов добавляет кнопку "Админ-панель".
+    """
+    keyboard = [
+        [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
+        [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
+        [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
+        [
+            InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
+            InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
+        ],
+    ]
+
+    if user_id in settings.get_admin_ids:
+        keyboard.insert(1, [
+            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin:main")
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_admin_stats_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура пагинации для статистики админа (по 5 элементов).
+    """
+    nav_row = []
+
+    # 1. Кнопка "Назад"
+    if page > 0:
+        nav_row.append(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:stats_page:{page - 1}")
+        )
+
+    # 2. Индикатор страницы
+    if total_pages > 1:
+        nav_row.append(
+            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore")
+        )
+
+    # 3. Кнопка "Вперед"
+    if page + 1 < total_pages:
+        nav_row.append(
+            InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin:stats_page:{page + 1}")
+        )
+
+    keyboard = []
+    if nav_row:
+        keyboard.append(nav_row)
+
+    # 4. Кнопка "Назад в админ-меню"
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад в админ-меню", callback_data="admin:main")])
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

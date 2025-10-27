@@ -75,7 +75,7 @@ async def cmd_start(message: Message):
         f"👋 Привет, {message.from_user.full_name}!\n\n"
         "Я бот для продажи VPN-ключей. "
         "Выбери действие в меню:",
-        reply_markup=get_main_menu_kb()
+        reply_markup=get_main_menu_kb(user_id=message.from_user.id)
     )
 
 
@@ -88,7 +88,7 @@ async def menu_main(callback: CallbackQuery):
         "👋 Привет!\n\n"
         "Я бот для продажи VPN-ключей. "
         "Выбери действие в меню:",
-        reply_markup=get_main_menu_kb()
+        reply_markup=get_main_menu_kb(user_id=callback.from_user.id)
     )
 
 
