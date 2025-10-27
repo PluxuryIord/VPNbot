@@ -14,28 +14,32 @@ async def init_db():
         await conn.run_sync(metadata.create_all)
 
 
-async def get_or_create_user(user_id: int, username: str, first_name: str):
-    """Добавляет нового пользователя, если его нет"""
+async def get_or_create_user(user_id: int, username: str, first_name: str) -> tuple[bool, bool]:
+    """
+    Добавляет нового пользователя, если его нет.
+    Возвращает кортеж: (user_created: bool, has_received_trial: bool)
+    """
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            # Проверяем, существует ли пользователь
             result = await session.execute(
                 select(Users).where(Users.c.user_id == user_id)
             )
             user = result.fetchone()
 
             if not user:
-                # Создаем нового
                 await session.execute(
                     insert(Users).values(
                         user_id=user_id,
                         username=username,
-                        first_name=first_name
+                        first_name=first_name,
+                        has_received_trial=False # Явно указываем при создании
                     )
                 )
                 await session.commit()
-                return True  # True = Cоздан
-            return False  # False = Уже был
+                return True, False # Создан, триал не получал
+            else:
+                # Возвращаем статус триала существующего пользователя
+                return False, user.has_received_trial # Не создан, статус триала
 
 
 async def get_products(country: str | None = None):
@@ -187,10 +191,33 @@ async def get_all_user_ids():
         return result.scalars().all()
 
 
-async def delete_order(order_id: int):
-    """Удаляет заказ по ID."""
+# async def delete_order(order_id: int):
+#     """Удаляет заказ по ID."""
+#     async with AsyncSessionLocal() as session:
+#         async with session.begin():
+#             stmt = delete(Orders).where(Orders.c.id == order_id)
+#             await session.execute(stmt)
+#             await session.commit()
+
+
+async def check_trial_status(user_id: int) -> bool:
+    """Проверяет, получал ли пользователь пробный ключ."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Users.c.has_received_trial).where(Users.c.user_id == user_id)
+        )
+        status = result.scalar_one_or_none()
+        return status if status is not None else False
+
+
+async def mark_trial_received(user_id: int):
+    """Отмечает, что пользователь получил пробный ключ."""
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            stmt = delete(Orders).where(Orders.c.id == order_id)
+            stmt = (
+                update(Users)
+                .where(Users.c.user_id == user_id)
+                .values(has_received_trial=True)
+            )
             await session.execute(stmt)
             await session.commit()

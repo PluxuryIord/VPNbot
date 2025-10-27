@@ -21,7 +21,8 @@ Users = Table(
     Column('user_id', BigInteger, primary_key=True, unique=True, autoincrement=False),
     Column('username', String(255), nullable=True),
     Column('first_name', String(255)),
-    Column('created_at', DateTime, server_default=func.now())
+    Column('created_at', DateTime, server_default=func.now()),
+    Column('has_received_trial', Boolean, nullable=False, default=False, server_default='false')
 )
 
 # Таблица продуктов (тарифов)
@@ -55,7 +56,7 @@ Keys = Table(
     metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('user_id', BigInteger, ForeignKey('users.user_id'), nullable=False),
-    Column('order_id', Integer, ForeignKey('orders.id'), nullable=False),
+    Column('order_id', Integer, ForeignKey('orders.id'), nullable=True),
     Column('vless_key', String, unique=True, nullable=False),
     Column('created_at', DateTime, server_default=func.now()),
     Column('expires_at', DateTime, nullable=False)

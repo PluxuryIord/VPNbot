@@ -9,6 +9,7 @@ from config import settings
 def get_main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
             [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
             [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
             [

@@ -7,7 +7,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKe
 from aiogram.filters import CommandStart
 from aiogram.exceptions import AiogramError
 from config import settings
-from utils import issue_key_to_user
+from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
     get_country_selection_kb, get_my_keys_kb, get_key_details_kb
@@ -102,6 +102,42 @@ async def menu_buy_select_country(callback: CallbackQuery):
         reply_markup=get_country_selection_kb()  # Новая клавиатура
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "trial:get")
+async def process_trial_get(callback: CallbackQuery, bot: Bot):
+    """Обрабатывает нажатие на кнопку 'Пробный период'."""
+    user_id = callback.from_user.id
+    log.info(f"Пользователь {user_id} запросил пробный период.")
+    await callback.answer("⏳ Проверяю возможность выдачи...") # Ответ-заглушка
+
+    success, result_data = await issue_trial_key(bot, user_id)
+
+    # --- Если УСПЕШНО выдан ключ ---
+    if success:
+        vless_string = result_data
+        expires_at = datetime.datetime.now() + datetime.timedelta(days=1)
+        success_text = (
+            f"✅ **Пробный ключ на 24 часа активирован!**\n\n"
+            f"Сервер: **Финляндия** 🇫🇮\n\n"
+            "Ваш ключ доступа:\n"
+            f"```\n{vless_string}\n```\n\n"
+            f"Действителен до: **{expires_at.strftime('%Y-%m-%d %H:%M')}**\n\n"
+            "Скопируйте ключ и добавьте его в V2Box. Инструкцию можно найти в главном меню."
+        )
+        # Отправляем ключ НОВЫМ сообщением (не редактируем меню)
+        await callback.message.answer(
+            success_text,
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
+        # Можно опционально отредактировать исходное меню, убрав кнопку триала, но проще оставить как есть
+        # await callback.message.edit_reply_markup(reply_markup=get_main_menu_kb()) # Пример
+
+    # --- Если НЕ УДАЛОСЬ (уже получал или ошибка) ---
+    else:
+        error_message = result_data # Функция вернула текст ошибки
+        await callback.answer(error_message, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("select_country:"))

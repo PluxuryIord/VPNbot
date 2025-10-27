@@ -12,7 +12,6 @@ import vpn_api
 
 log = logging.getLogger(__name__)
 
-
 global_last_server_indices: Dict[str, int] = {}
 
 
@@ -38,7 +37,7 @@ async def get_least_loaded_server(country: str) -> Optional[XuiServer]:
 
     # 3. Применяем "Карусель" к отфильтрованному списку
     next_index = (last_index + 1) % len(servers_in_country)
-    global_last_server_indices[country] = next_index # Обновляем индекс для ЭТОЙ СТРАНЫ
+    global_last_server_indices[country] = next_index  # Обновляем индекс для ЭТОЙ СТРАНЫ
 
     selected_server = servers_in_country[next_index]
 
@@ -59,7 +58,7 @@ def generate_vless_key(user_uuid: str, product_name: str, user_id: int, server_c
 
     vless_server = server_config.vless_server
     vless_port = server_config.vless_port
-    security_type = server_config.security_type # "reality"
+    security_type = server_config.security_type  # "reality"
     reality_pbk = server_config.reality_pbk
     reality_short_id = server_config.reality_short_id
     reality_sni = server_config.reality_server_names[0] if server_config.reality_server_names else ""
@@ -89,13 +88,14 @@ def generate_vless_key(user_uuid: str, product_name: str, user_id: int, server_c
     return vless_string
 
 
-async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: int, country: str) -> tuple[bool, str | None]: # Добавили country
+async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: int, country: str) -> tuple[
+    bool, str | None]:  # Добавили country
     """
     Полный цикл выдачи ключа: Выбор сервера ИЗ СТРАНЫ -> API -> Генерация -> БД
     """
     try:
         # 1. ВЫБИРАЕМ СЕРВЕР ИЗ УКАЗАННОЙ СТРАНЫ
-        server_config = await get_least_loaded_server(country=country) # Передаем страну
+        server_config = await get_least_loaded_server(country=country)  # Передаем страну
         if not server_config:
             raise ValueError(f"No servers found for country: {country}")
 
@@ -143,7 +143,7 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
                 await bot.send_message(
                     admin_id,
                     f"⚠️ **СБОЙ ВЫДАЧИ КЛЮЧА** ⚠️\n\n"
-                    f"Не удалось выдать ключ для заказа #{order_id} (Пользователь: {user_id}, Страна: {country}).\n" # Добавили страну в лог
+                    f"Не удалось выдать ключ для заказа #{order_id} (Пользователь: {user_id}, Страна: {country}).\n"  # Добавили страну в лог
                     f"Ошибка: {e}\n\n"
                     "**Требуется ручное вмешательство!**",
                     parse_mode="Markdown"
@@ -152,3 +152,86 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
             log.error(f"Failed to notify admin about failure: {admin_notify_e}")
 
         return False, None
+
+
+async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
+    """
+    Выдает ОДНОРАЗОВЫЙ пробный ключ на 24 часа.
+    1. Проверяет, не получал ли юзер триал.
+    2. Выбирает ПЕРВЫЙ финский сервер.
+    3. Добавляет юзера на VLess сервер (API) на 1 день.
+    4. Если успешно -> Сохраняет ключ в Keys и отмечает юзера в Users.
+    Возвращает (True/False, vless_string/None)
+    """
+    try:
+        # 1. Проверяем статус триала в БД
+        has_trial = await db.check_trial_status(user_id)
+        if has_trial:
+            log.warning(f"Пользователь {user_id} уже получал пробный ключ.")
+            return False, "Вы уже активировали пробный период."  # Возвращаем False и сообщение
+
+        # 2. Находим ПЕРВЫЙ финский сервер в конфиге
+        finland_servers = [s for s in settings.XUI_SERVERS if s.country == "Финляндия"]
+        if not finland_servers:
+            log.error("Не найдены серверы для Финляндии в конфиге для выдачи триала.")
+            raise ValueError("Конфигурация для пробного периода не найдена.")
+        server_config = finland_servers[0]  # Берем первый финский
+
+        # 3. Генерируем UUID и дату истечения (через 1 день)
+        new_uuid = str(uuid.uuid4())
+        expires_at = datetime.datetime.now() + datetime.timedelta(days=1)
+        trial_duration_days = 1
+
+        # 4. ДОБАВЛЯЕМ ЮЗЕРА НА VPN-СЕРВЕР
+        log.info(f"Выдача пробного ключа для {user_id} на сервере {server_config.name}...")
+        api_success = await vpn_api.add_vless_user(
+            server_config=server_config,
+            user_id=user_id,
+            days=trial_duration_days,  # Длительность 1 день
+            new_uuid=new_uuid
+        )
+
+        if not api_success:
+            raise Exception("Failed to add trial user via X-UI API")
+
+        # 5. Генерируем VLESS-ссылку
+        vless_string = generate_vless_key(
+            user_uuid=new_uuid,
+            product_name="Пробный",  # Название для тега
+            user_id=user_id,
+            server_config=server_config
+        )
+
+        # 6. Сохраняем ключ в НАШУ БД (без привязки к заказу - order_id = None или 0?)
+        # Давайте привяжем к несуществующему заказу 0, чтобы соответствовать схеме
+        await db.add_vless_key(
+            user_id=user_id,
+            order_id=None,  # Используем 0 для обозначения триального ключа
+            vless_key=vless_string,
+            expires_at=expires_at
+        )
+
+        # 7. Отмечаем в БД, что юзер ПОЛУЧИЛ триал
+        await db.mark_trial_received(user_id)
+
+        log.info(f"Пробный ключ {new_uuid} успешно выдан пользователю {user_id} на сервере {server_config.name}")
+        return True, vless_string  # Возвращаем успех и ключ
+
+    except Exception as e:
+        log.error(f"Ошибка выдачи пробного ключа для {user_id}: {e}")
+        # Уведомляем админа
+        try:
+            for admin_id in settings.get_admin_ids:
+                await bot.send_message(
+                    admin_id,
+                    f"⚠️ **СБОЙ ВЫДАЧИ ТРИАЛА** ⚠️\n\n"
+                    f"Не удалось выдать пробный ключ пользователю {user_id}.\n"
+                    f"Ошибка: {e}\n\n"
+                    "**Требуется проверить логи.**",
+                    parse_mode="Markdown"
+                )
+        except Exception as admin_notify_e:
+            log.error(f"Не удалось уведомить админа о сбое триала: {admin_notify_e}")
+
+        # Возвращаем False и общее сообщение об ошибке
+        return False, "Не удалось выдать пробный ключ. Попробуйте позже или свяжитесь с поддержкой."
