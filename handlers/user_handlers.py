@@ -13,7 +13,7 @@ from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platform
     get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
-from utils import generate_vless_key
+from utils import generate_vless_key, handle_payment_logic
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -544,7 +544,7 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
 async def process_check_payment(callback: CallbackQuery, bot: Bot):
     """
     Обработка нажатия на кнопку "Проверить оплату".
-    Обрабатывает как новые покупки, так и продления.
+    Теперь использует универсальную функцию handle_payment_logic.
     """
     order_id = int(callback.data.split(":")[1])
 
@@ -553,23 +553,16 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
         await callback.answer("Заказ не найден!", show_alert=True)
         return
 
-    # Проверяем, может пользователь нажал кнопку снова после успешной оплаты
+    # 1. Проверяем, может пользователь нажал кнопку снова ПОСЛЕ успешной оплаты
     if order.status == 'paid':
-        # Проверяем, был ли это заказ на продление или новый ключ
-        # (Простой способ: если к этому order_id привязан ключ, значит это была новая покупка)
-        key_linked_to_order = await db.get_user_key_by_order_id(order_id)
-        if key_linked_to_order:
-            await callback.answer("Этот заказ уже оплачен и ключ выдан.", show_alert=True)
-        else:
-            # Скорее всего, это был платеж за продление, который уже обработан
-            await callback.answer("Этот платеж (возможно, за продление) уже обработан.", show_alert=True)
+        await callback.answer("Этот заказ уже оплачен.", show_alert=True)
         return
 
     if not order.payment_id:
         await callback.answer("Ошибка: ID платежа не найден для этого заказа.", show_alert=True)
         return
 
-    # Запрашиваем статус в ЮKassa
+    # 2. Запрашиваем статус в ЮKassa
     payment_info = await check_yookassa_payment(order.payment_id)
     if not payment_info:
         await callback.answer("Не удалось проверить статус платежа в ЮKassa.", show_alert=True)
@@ -577,143 +570,38 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
 
     # --- Платеж УСПЕШЕН ---
     if payment_info.status == 'succeeded':
+        await callback.answer("✅ Оплата найдена! Обрабатываю...")
+
+        # 3. Обновляем статус в БД (на случай, если вебхук еще не дошел)
         await db.update_order_status(order_id, order.payment_id, status='paid')
 
-        # === ПРОВЕРЯЕМ, ЭТО ПРОДЛЕНИЕ ИЛИ НОВЫЙ КЛЮЧ ===
-        metadata = payment_info.metadata
-        renewal_key_id_str = metadata.get("renewal_key_id")
+        # 4. Вызываем ту же универсальную функцию, что и вебхук
+        success, message_text = await handle_payment_logic(bot, order, payment_info)
 
-        # --- ЛОГИКА ПРОДЛЕНИЯ ---
-        if renewal_key_id_str:
-            try:
-                renewal_key_id = int(renewal_key_id_str)
-                await callback.answer("✅ Оплата найдена! Продлеваю ключ...")
+        # 5. РЕДАКТИРУЕМ текущее сообщение, показывая результат
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]
+        ])
+        if success:
+            # Добавляем кнопку "Мои ключи" при успехе
+            kb.inline_keyboard.insert(0, [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
 
-                # 1. Получаем ключ для продления и продукт
-                key_to_renew = await db.get_key_by_id(renewal_key_id)
-                product = await db.get_product_by_id(order.product_id)
-
-                # Проверяем, что ключ и продукт существуют и принадлежат пользователю
-                if not key_to_renew or not product or key_to_renew.user_id != callback.from_user.id:
-                    log.error(
-                        f"Ошибка продления: Ключ {renewal_key_id} или продукт {order.product_id} не найден/не принадлежит пользователю для заказа {order_id}.")
-                    raise ValueError("Ключ или продукт для продления не найден или не принадлежит вам.")
-
-                # 2. Рассчитываем новую дату истечения
-                now = datetime.datetime.now()
-                # Продлеваем от даты окончания, если ключ еще активен, иначе от текущего момента
-                start_date = max(now, key_to_renew.expires_at)
-                new_expiry_date = start_date + datetime.timedelta(days=product.duration_days)
-
-                # 3. Обновляем ключ в БД
-                await db.update_key_expiry(renewal_key_id, new_expiry_date)
-
-                # 4. TODO (Опционально): Обновить срок действия на сервере X-UI
-                # Это может быть не нужно, если X-UI/Xray корректно обрабатывает `expiryTime` при создании.
-                # Но для надежности можно добавить вызов API для обновления клиента.
-                # log.info(f"Обновление срока действия на сервере X-UI для ключа {renewal_key_id}...")
-                # ... (здесь вызов vpn_api.update_client_expiry(...) ) ...
-
-                # 5. Сообщаем пользователю об успехе
-                success_text = (
-                    f"✅ **Ключ успешно продлен!**\n\n"
-                    f"Тариф: **{product.name}**\n"
-                    f"Новый срок действия: до **{new_expiry_date.strftime('%Y-%m-%d %H:%M')}**"
-                )
-                await callback.message.edit_text(
-                    success_text,
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="К списку ключей", callback_data="menu:keys")],
-                        [InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]
-                    ]),
-                    parse_mode="Markdown"
-                )
-
-            except Exception as e:
-                log.error(f"Ошибка при обработке продления ключа {renewal_key_id_str} для заказа {order_id}: {e}")
-                await callback.message.edit_text(
-                    "❌ **Ошибка продления ключа**\n\n"
-                    "Оплата прошла, но при обновлении ключа произошла ошибка.\n"
-                    "Мы уже уведомили администратора. Пожалуйста, свяжитесь с поддержкой.",
-                    reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]])
-                )
-                # Можно рассмотреть удаление ошибочного заказа на продление, чтобы избежать путаницы
-                # await db.delete_order(order_id)
-
-        # --- ЛОГИКА ВЫДАЧИ НОВОГО КЛЮЧА ---
-        else:
-            await callback.answer("✅ Оплата найдена! Генерирую ключ...")
-            country = metadata.get("country")
-
-            # Аварийный механизм определения страны, если её нет в metadata
-            if not country:
-                log.error(f"!!! ОШИБКА: Не найдена страна в metadata платежа {payment_info.id} для заказа {order_id}")
-                product_for_country = await db.get_product_by_id(order.product_id)
-                if product_for_country and product_for_country.country:
-                    country = product_for_country.country
-                    log.warning(f"Страна '{country}' восстановлена по Product ID {order.product_id}")
-                else:
-                    country = settings.XUI_SERVERS[0].country if settings.XUI_SERVERS else "Unknown"
-                    log.warning(f"Страна не найдена, используется страна первого сервера: '{country}'")
-
-                if country == "Unknown":
-                    await callback.message.edit_text(
-                        "Критическая ошибка: Не удалось определить страну сервера. Свяжитесь с поддержкой.")
-                    # Помечаем заказ как ошибочный
-                    await db.update_order_status(order_id, payment_info.id, status='failed')
-                    return
-
-            # Вызываем функцию выдачи ключа
-            success, vless_string = await issue_key_to_user(
-                bot=bot,
-                user_id=order.user_id,
-                product_id=order.product_id,
-                order_id=order.id,
-                country=country
-            )
-
-            if success:
-                # Показываем новый ключ пользователю
-                product = await db.get_product_by_id(order.product_id)
-                expires_at = datetime.datetime.now() + datetime.timedelta(days=product.duration_days)
-                success_text = (
-                    f"✅ **Оплата прошла успешно! ({country})**\n\n"
-                    "Ваш ключ доступа:\n"
-                    f"```\n{vless_string}\n```\n\n"
-                    f"Срок действия: **{product.duration_days} дней** (до {expires_at.strftime('%Y-%m-%d %H:%M')})\n\n"
-                    "Скопируйте ключ и добавьте его в V2Box."
-                )
-                await callback.message.edit_text(
-                    success_text,
-                    reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]]),
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True,
-                )
-            else:
-                # Сообщаем об ошибке выдачи
-                await callback.message.edit_text(
-                    "❌ **Ошибка выдачи ключа**\n\n"
-                    "Оплата прошла, но при создании ключа произошла ошибка.\n"
-                    "Мы уже уведомили администратора. Пожалуйста, свяжитесь с поддержкой.",
-                    reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]])
-                )
-                # Помечаем заказ как ошибочный, чтобы админ разобрался
-                await db.update_order_status(order_id, payment_info.id, status='failed')
+        await callback.message.edit_text(
+            message_text,
+            reply_markup=kb,
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
 
     # --- Платеж НЕ УСПЕШЕН ---
     elif payment_info.status == 'pending':
         await callback.answer("Платеж еще не поступил. Попробуйте через минуту.", show_alert=True)
 
-    elif payment_info.status in ('canceled',
-                                 'waiting_for_capture'):  # 'waiting_for_capture' тоже считаем неуспешным пока
+    elif payment_info.status in ('canceled', 'waiting_for_capture'):
         await callback.answer(f"Платеж отменен или ожидает подтверждения (статус: {payment_info.status}).",
                               show_alert=True)
-        # Обновляем статус заказа в БД на 'failed'
         await db.update_order_status(order_id, order.payment_id, status='failed')
 
-    else:  # Другие возможные статусы (редко)
+    else:
         log.warning(f"Неожиданный статус платежа {payment_info.id}: {payment_info.status}")
         await callback.answer(f"Неизвестный статус платежа: {payment_info.status}", show_alert=True)

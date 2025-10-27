@@ -6,9 +6,12 @@ from typing import Optional, Dict
 from aiogram import Bot
 from urllib.parse import quote
 
+from yookassa import Payment
+
 from config import settings, XuiServer
 from database import db_commands as db
 import vpn_api
+from database.models import Orders
 
 log = logging.getLogger(__name__)
 
@@ -235,3 +238,99 @@ async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
 
         # Возвращаем False и общее сообщение об ошибке
         return False, "Не удалось выдать пробный ключ. Попробуйте позже или свяжитесь с поддержкой."
+
+
+async def handle_payment_logic(bot: Bot, order: Orders, payment_info: Payment) -> tuple[bool, str]:
+    """
+    Универсальная логика обработки УСПЕШНОГО платежа.
+    Вызывается и вебхуком, и кнопкой "Проверить".
+    Возвращает (Успех, Текст сообщения для пользователя).
+    """
+    try:
+        metadata = payment_info.metadata
+        renewal_key_id_str = metadata.get("renewal_key_id")
+        user_id = order.user_id
+        product_id = order.product_id
+        order_id = order.id
+
+        # --- ЛОГИКА ПРОДЛЕНИЯ ---
+        if renewal_key_id_str:
+            renewal_key_id = int(renewal_key_id_str)
+            log.info(f"[PaymentLogic] Заказ {order_id} определен как ПРОДЛЕНИЕ ключа {renewal_key_id}.")
+
+            key_to_renew = await db.get_key_by_id(renewal_key_id)
+            product = await db.get_product_by_id(product_id)
+
+            if not key_to_renew or not product or key_to_renew.user_id != user_id:
+                log.error(
+                    f"Ошибка продления: Ключ {renewal_key_id} или продукт {product_id} не найден/не принадлежит пользователю {user_id} для заказа {order_id}.")
+                raise ValueError("Ключ или продукт для продления не найден или не принадлежит вам.")
+
+            now = datetime.datetime.now()
+            start_date = max(now, key_to_renew.expires_at)
+            new_expiry_date = start_date + datetime.timedelta(days=product.duration_days)
+
+            await db.update_key_expiry(renewal_key_id, new_expiry_date)
+            # (Опционально: можно добавить вызов API vpn_api для обновления на сервере X-UI [cite: 115])
+            log.info(f"Ключ {renewal_key_id} продлен до {new_expiry_date}.")
+
+            message_text = (
+                f"✅ **Ключ успешно продлен!**\n\n"
+                f"Тариф: **{product.name}**\n"
+                f"Новый срок действия: до **{new_expiry_date.strftime('%Y-%m-%d %H:%M')}**"
+            )
+            return True, message_text
+
+        # --- ЛОГИКА ВЫДАЧИ НОВОГО КЛЮЧА ---
+        else:
+            log.info(f"[PaymentLogic] Заказ {order_id} определен как НОВАЯ ПОКУПКА.")
+            country = metadata.get("country")
+
+            # Аварийный механизм определения страны
+            if not country:
+                log.error(f"!!! ОШИБКА: Не найдена страна в metadata платежа {payment_info.id} для заказа {order_id}")
+                product_for_country = await db.get_product_by_id(product_id)
+                if product_for_country and product_for_country.country:
+                    country = product_for_country.country
+                    log.warning(f"Страна '{country}' восстановлена по Product ID {product_id}")
+                else:
+                    country = settings.XUI_SERVERS[0].country if settings.XUI_SERVERS else "Unknown"
+                    log.warning(f"Страна не найдена, используется страна первого сервера: '{country}'")
+
+                if country == "Unknown":
+                    await db.update_order_status(order_id, payment_info.id, status='failed')
+                    return False, "Критическая ошибка: Не удалось определить страну сервера. Свяжитесь с поддержкой."
+
+            # Вызываем функцию выдачи ключа
+            success, vless_string = await issue_key_to_user(
+                bot=bot,
+                user_id=user_id,
+                product_id=product_id,
+                order_id=order_id,
+                country=country
+            )
+
+            if success:
+                product = await db.get_product_by_id(product_id)
+                expires_at = datetime.datetime.now() + datetime.timedelta(days=product.duration_days)
+                message_text = (
+                    f"✅ **Оплата прошла успешно! ({country})**\n\n"
+                    "Ваш ключ доступа:\n"
+                    f"```\n{vless_string}\n```\n\n"
+                    f"Срок действия: **{product.duration_days} дней** (до {expires_at.strftime('%Y-%m-%d %H:%M')})\n\n"
+                    "Скопируйте ключ и добавьте его в V2Box."
+                )
+                return True, message_text
+            else:
+                # Ошибка выдачи (админ уже уведомлен из issue_key_to_user)
+                await db.update_order_status(order_id, payment_info.id, status='failed')
+                message_text = (
+                    "❌ **Ошибка выдачи ключа**\n\n"
+                    "Оплата прошла, но при создании ключа произошла ошибка.\n"
+                    "Мы уже уведомили администратора. Пожалуйста, свяжитесь с поддержкой."
+                )
+                return False, message_text
+
+    except Exception as e:
+        log.error(f"Критическая ошибка в handle_payment_logic для заказа {order_id}: {e}")
+        return False, "❌ **Критическая ошибка**\n\nПроизошла непредвиденная ошибка при обработке вашего платежа. Свяжитесь с поддержкой."
