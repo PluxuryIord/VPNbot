@@ -10,7 +10,7 @@ from config import settings
 from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
-    get_country_selection_kb, get_my_keys_kb, get_key_details_kb
+    get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key
@@ -462,13 +462,12 @@ async def menu_instruction_detail(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu:support")
 async def menu_support(callback: CallbackQuery):
-    """Показывает контакт поддержки."""
+    """Показывает контакт поддержки и ссылку на оферту."""
     await callback.message.edit_text(
-        TEXT_SUPPORT,
-        reply_markup=InlineKeyboardMarkup(  # Клавиатура только с кнопкой "Назад"
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]]
-        ),
+        TEXT_SUPPORT, # Текст остается прежним ("По всем вопросам пишите...")
+        reply_markup=get_support_kb() # Используем новую клавиатуру
     )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("buy_product:"))

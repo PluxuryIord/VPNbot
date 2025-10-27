@@ -147,3 +147,17 @@ def get_key_details_kb(key_id: int, current_page: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"mykeys_page:{current_page}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_support_kb() -> InlineKeyboardMarkup:
+    """Клавиатура для раздела Поддержка."""
+    keyboard = [
+        # Кнопка-ссылка на оферту
+        [InlineKeyboardButton(
+            text="📜 Публичная оферта",
+            url="https://telegra.ph/PUBLICHNAYA-OFERTA-o-zaklyuchenii-dogovora-ob-okazanii-uslug-10-27-2"
+        )],
+        # Кнопка "Назад"
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
