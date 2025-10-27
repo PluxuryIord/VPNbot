@@ -496,18 +496,15 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
         product_id = int(product_id_str)
     except ValueError:
         log.error(f"Invalid callback data format: {callback.data}")
-        await callback.message.edit_text("Произошла ошибка. Попробуйте снова.")
+        #
+        await callback.answer("Произошла ошибка. Попробуйте снова.", show_alert=True)
         return
 
     log.info(f"User {callback.from_user.id} initiated purchase for product {product_id} in country {country}")
 
     product = await db.get_product_by_id(product_id)
     if not product:
-        await callback.message.edit_text(
-            "Тариф не найден. Попробуйте снова.",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад к странам", callback_data="menu:buy")]])
-        )
+        await callback.answer("Тариф не найден. Попробуйте снова.", show_alert=True)
         return
 
     # 1. Создаем заказ в БД
@@ -522,23 +519,30 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
         amount=product.price,
         description=f"Оплата '{product.name}' ({country}) (Заказ #{order_id})",
         order_id=order_id,
-        metadata={"country": country}  # ⬅️ Добавляем страну сюда
+        metadata={"country": country}
     )
 
     # 3. Обновляем заказ, добавляя payment_id
     await db.update_order_status(order_id, payment_id, status='pending')
 
     # 4. Отправляем ссылку на оплату
-    kb = get_payment_kb(payment_url, order_id)  # Клавиатура уже включает кнопку "Назад к странам"
+    kb = get_payment_kb(payment_url, order_id)  #
 
-    await callback.message.edit_text(
-        f"Вы выбрали: **{product.name} ({country})**\n"
-        f"Сумма к оплате: **{product.price} руб.**\n\n"
-        "Нажмите кнопку ниже, чтобы перейти к оплате:",
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
-
+    try:
+        # Отправляем НОВОЕ сообщение с оплатой
+        await callback.message.answer(
+            f"Вы выбрали: **{product.name} ({country})**\n"
+            f"Сумма к оплате: **{product.price} руб.**\n\n"
+            "Нажмите кнопку ниже, чтобы перейти к оплате:",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+        #
+        await callback.message.delete()
+    except Exception as e:
+        log.error(f"Ошибка при отправке/удалении сообщения об оплате: {e}")
+        #
+        await callback.answer("Не удалось отправить сообщение об оплате. Попробуйте снова.")
 
 @router.callback_query(F.data.startswith("check_payment:"))
 async def process_check_payment(callback: CallbackQuery, bot: Bot):
@@ -555,14 +559,14 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
 
     # 1. Проверяем, может пользователь нажал кнопку снова ПОСЛЕ успешной оплаты
     if order.status == 'paid':
-        await callback.answer("Этот заказ уже оплачен.", show_alert=True)
+        await callback.answer("Этот заказ уже оплачен. Ключ должен быть у вас в сообщениях.", show_alert=True)
         return
 
     if not order.payment_id:
         await callback.answer("Ошибка: ID платежа не найден для этого заказа.", show_alert=True)
         return
 
-    # 2. Запрашиваем статус в ЮKassa
+    # 2. Запрашиваем статус в ЮKassa [cite: 177]
     payment_info = await check_yookassa_payment(order.payment_id)
     if not payment_info:
         await callback.answer("Не удалось проверить статус платежа в ЮKassa.", show_alert=True)

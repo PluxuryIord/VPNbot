@@ -84,7 +84,6 @@ def get_payment_kb(payment_url: str, order_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
             [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"check_payment:{order_id}")],
-            [InlineKeyboardButton(text="⬅️ Отмена (к странам)", callback_data="menu:buy")]
         ]
     )
 
