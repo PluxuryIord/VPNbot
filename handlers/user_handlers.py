@@ -10,7 +10,7 @@ from config import settings
 from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
-    get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb
+    get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb, get_payment_method_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
@@ -489,14 +489,16 @@ async def menu_support(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("buy_product:"))
 async def process_buy_callback(callback: CallbackQuery, bot: Bot):
-    """Обработка нажатия на кнопку тарифа (теперь со страной)"""
+    """
+    Обработка нажатия на кнопку тарифа.
+    Шаг 1: Создает заказ (pending) и показывает выбор способа оплаты.
+    """
     await callback.answer(cache_time=1)
     try:
         _, product_id_str, country = callback.data.split(":")
         product_id = int(product_id_str)
     except ValueError:
         log.error(f"Invalid callback data format: {callback.data}")
-        #
         await callback.answer("Произошла ошибка. Попробуйте снова.", show_alert=True)
         return
 
@@ -507,42 +509,116 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer("Тариф не найден. Попробуйте снова.", show_alert=True)
         return
 
-    # 1. Создаем заказ в БД
     order_id = await db.create_order(
         user_id=callback.from_user.id,
         product_id=product_id,
         amount=product.price
     )
 
-    # 2. Создаем счет в ЮKassa, добавляем страну в metadata
-    payment_url, payment_id = await create_yookassa_payment(
-        amount=product.price,
-        description=f"Оплата '{product.name}' ({country}) (Заказ #{order_id})",
-        order_id=order_id,
-        metadata={"country": country}
-    )
+    # 2. Показываем ВЫБОР СПОСОБА ОПЛАТЫ
+    # (Импорт get_payment_method_kb должен быть вверху файла)
+    kb = get_payment_method_kb(order_id, country)
 
-    # 3. Обновляем заказ, добавляя payment_id
+    try:
+        # Редактируем текущее сообщение
+        await callback.message.edit_text(
+            f"Вы выбрали: **{product.name} ({country})**\n"
+            f"Сумма к оплате: **{product.price} руб.**\n\n"
+            "Теперь выберите удобный способ оплаты:",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        log.error(f"Ошибка при показе выбора способа оплаты: {e}")
+        await callback.answer("Не удалось обновить меню. Попробуйте снова.")
+
+
+@router.callback_query(F.data.startswith("pay_method:"))
+async def process_payment_method(callback: CallbackQuery, bot: Bot):
+    """
+    Обработка нажатия на кнопку способа оплаты (Карта или СБП).
+    Шаг 2: Создает ссылку на оплату и отправляет ее НОВЫМ сообщением.
+    """
+    await callback.answer("⏳ Создаю ссылку на оплату...")
+
+    try:
+        _, method, order_id_str = callback.data.split(":")
+        order_id = int(order_id_str)
+    except ValueError:
+        log.error(f"Invalid pay_method callback data: {callback.data}")
+        await callback.answer("Ошибка! Не удалось обработать способ оплаты.", show_alert=True)
+        return
+
+    # 1. Получаем заказ из БД
+    order = await db.get_order_by_id(order_id)
+    if not order or order.user_id != callback.from_user.id:
+        await callback.answer("Заказ не найден!", show_alert=True)
+        return
+
+    # 2. Не даем создавать новую ссылку, если платеж уже в процессе
+    # (кроме 'failed', но для простоты блокируем все, кроме 'pending')
+    if order.status != 'pending':
+        await callback.answer("Платеж по этому заказу уже создан или обработан.", show_alert=True)
+        return
+
+    product = await db.get_product_by_id(order.product_id)
+    if not product:
+        await callback.answer("Ошибка: Тариф не найден для этого заказа.", show_alert=True)
+        return
+
+    # 3. Устанавливаем способ оплаты в зависимости от кнопки
+    payment_method_data = None
+    description_suffix = " (Карта/ЮMoney)"
+    if method == "sbp":
+        # Это заставит ЮKassa показать ТОЛЬКО СБП
+        payment_method_data = {"type": "sbp"}
+        description_suffix = " (СБП)"
+
+    # 4. Создаем счет в ЮKassa
+    try:
+        country = product.country
+        if not country:  # На случай, если у тарифа NULL country (общий)
+            # Пытаемся вытащить страну из metadata заказа, если она там есть
+            # (В нашем коде ее там нет, берем из продукта - product.country)
+            # Если и там нет, ставим "Unknown"
+            country = "Unknown"
+
+        metadata = {"country": country}
+
+        payment_url, payment_id = await create_yookassa_payment(
+            amount=product.price,
+            description=f"Оплата '{product.name}' ({country}){description_suffix} (Заказ #{order_id})",
+            order_id=order_id,
+            metadata=metadata,
+            payment_method_data=payment_method_data  # ⬅️ ГЛАВНОЕ ИЗМЕНЕНИЕ
+        )
+    except Exception as e:
+        log.error(f"Ошибка создания счета ЮKassa (метод {method}) для заказа {order_id}: {e}")
+        await callback.answer("Не удалось создать счет в ЮKassa. Попробуйте другой способ.", show_alert=True)
+        return
+
+    # 5. Обновляем заказ, добавляя payment_id
     await db.update_order_status(order_id, payment_id, status='pending')
 
-    # 4. Отправляем ссылку на оплату
-    kb = get_payment_kb(payment_url, order_id)  #
+    # 6. Отправляем ссылку на оплату НОВЫМ СООБЩЕНИЕМ
+    # (Используем get_payment_kb из keyboards.py) [cite_start][cite: 105]
+    kb = get_payment_kb(payment_url, order_id)
 
     try:
         # Отправляем НОВОЕ сообщение с оплатой
         await callback.message.answer(
-            f"Вы выбрали: **{product.name} ({country})**\n"
-            f"Сумма к оплате: **{product.price} руб.**\n\n"
+            f"Ваша ссылка на оплату (Счет: {description_suffix}):\n"
+            f"Тариф: **{product.name} ({country})**\n"
+            f"Сумма: **{product.price} руб.**\n\n"
             "Нажмите кнопку ниже, чтобы перейти к оплате:",
             reply_markup=kb,
             parse_mode="Markdown"
         )
-        #
+        # И удаляем сообщение с выбором способа
         await callback.message.delete()
     except Exception as e:
         log.error(f"Ошибка при отправке/удалении сообщения об оплате: {e}")
-        #
-        await callback.answer("Не удалось отправить сообщение об оплате. Попробуйте снова.")
+
 
 @router.callback_query(F.data.startswith("check_payment:"))
 async def process_check_payment(callback: CallbackQuery, bot: Bot):

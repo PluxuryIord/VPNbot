@@ -10,13 +10,15 @@ Configuration.account_id = settings.YOOKASSA_SHOP_ID.get_secret_value()
 Configuration.secret_key = settings.YOOKASSA_SECRET_KEY.get_secret_value()
 
 
-async def create_yookassa_payment(amount: float, description: str, order_id: int, metadata: Optional[Dict[str, Any]] = None): # Добавили metadata
+async def create_yookassa_payment(amount: float, description: str, order_id: int,
+                                  metadata: Optional[Dict[str, Any]] = None,
+                                  payment_method_data: Optional[Dict[str, Any]] = None):  # ⬅️ ДОБАВИЛИ ЭТОТ АРГУМЕНТ
     """
     Создает платеж в ЮKassa и возвращает URL для оплаты и ID платежа.
-"""
+    """
     idempotence_key = str(uuid.uuid4())
 
-    # Добавляем order_id в metadata по умолчанию
+    # [cite_start]Добавляем order_id в metadata по умолчанию [cite: 175]
     payment_metadata = metadata or {}
     payment_metadata["order_id"] = str(order_id)
 
@@ -26,7 +28,6 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
             "currency": "RUB"
         },
         "confirmation": {
-
             "type": "redirect",
             "return_url": f"https://t.me/{settings.BOT_USERNAME}"
         },
@@ -34,14 +35,13 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
         "description": description,
         "metadata": payment_metadata,
 
-        # ⬇️ ⬇️ ⬇️ ВОТ ИЗМЕНЕНИЕ ⬇️ ⬇️ ⬇️
         "receipt": {
             "customer": {
                 "email": f"adelchik022005@gmail.com.com"
             },
             "items": [
                 {
-                    "description": description,  #
+                    "description": description,
                     "quantity": "1.00",
                     "amount": {
                         "value": f"{amount:.2f}",
@@ -52,7 +52,11 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
             ],
             "send": False
         }
+
     }
+
+    if payment_method_data:
+        payment_data["payment_method_data"] = payment_method_data
 
     payment = Payment.create(payment_data, idempotence_key)
 
@@ -61,8 +65,7 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
 
 async def check_yookassa_payment(payment_id: str):
     """
-    Проверяет статус платежа в ЮKassa по его ID.
-    Возвращает объект Payment.
+    [cite_start]Проверяет статус платежа в ЮKassa по его ID. [cite: 177]
     """
     try:
         payment_info = Payment.find_one(payment_id)

@@ -88,6 +88,17 @@ def get_payment_kb(payment_url: str, order_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def get_payment_method_kb(payment_url: str, order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Картой / ЮMoney", callback_data=f"pay_method:default:{order_id}")],
+            [InlineKeyboardButton(text="⚡ Система Быстрых Платежей (СБП)", callback_data=f"pay_method:sbp:{order_id}")],
+            # Кнопка отмены, чтобы вернуться к выбору тарифа
+            [InlineKeyboardButton(text="⬅️ Назад к тарифам", callback_data=f"select_country:{country}")]
+        ]
+    )
+
+
 def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
     """
     Генерирует клавиатуру для 'Мои ключи' с пагинацией.
