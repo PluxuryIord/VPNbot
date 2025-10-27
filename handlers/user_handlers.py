@@ -73,8 +73,8 @@ async def cmd_start(message: Message):
     )
     await message.answer(
         f"👋 Привет, {message.from_user.full_name}!\n\n"
-        f"Наш основной канал 👉 https://t.me/NjordVPN"
-        "Я бот для продажи VPN-ключей. "
+        f"Наш основной канал 👉 https://t.me/NjordVPN\n"
+        "Я бот для продажи VPN-ключей."
         "Выбери действие в меню:",
         reply_markup=get_main_menu_kb(user_id=message.from_user.id)
     )
@@ -87,7 +87,7 @@ async def menu_main(callback: CallbackQuery):
     """Главное меню (инлайн)."""
     await callback.message.edit_text(
         "👋 Привет!\n\n"
-        "Наш основной канал 👉 https://t.me/NjordVPN"
+        "Наш основной канал 👉 https://t.me/NjordVPN\n"
         "Я бот для продажи VPN-ключей. "
         "Выбери действие в меню:",
         reply_markup=get_main_menu_kb(user_id=callback.from_user.id)
