@@ -54,7 +54,7 @@ def get_instruction_platforms_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📱 Android", url="https://teletype.in/@coid_siemens/JnYNn8TyoDG"),
+                InlineKeyboardButton(text="📱 Android", url="https://teletype.in/@coid_siemens/0BKy1e3yrgt"),
                 InlineKeyboardButton(text="🍎 iPhone", url="https://teletype.in/@coid_siemens/3vXPZr2S0Kn"),
             ],
             [
