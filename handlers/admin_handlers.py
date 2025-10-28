@@ -133,9 +133,9 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
 
     try:
         if isinstance(update_obj, Message):
-            await update_obj.answer(final_text, reply_markup=kb, parse_mode="HTML")
+            await update_obj.answer(final_text, reply_markup=kb, parse_mode="Markdown")
         else:
-            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="HTML")
+            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="Markdown")
             await update_obj.answer()
 
     except AiogramError as e:
