@@ -127,7 +127,7 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
     if total_pages > 1:
         page_indicator = f"\n\n📄 Страница {page + 1} / {total_pages}"
 
-    final_text = summary + "\n<pre>---------------------------------</pre>\n" + detailed_report + page_indicator
+    final_text = summary + detailed_report + page_indicator
 
     kb = get_admin_stats_kb(page, total_pages)
 
