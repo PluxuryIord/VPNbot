@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import datetime
-import math  # ⬅️ Новый импорт
+import math
 from collections import defaultdict
 
 from aiogram import Router, F, Bot
@@ -9,12 +9,11 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, Filter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.exceptions import AiogramError  # ⬅️ Новый импорт
+from aiogram.exceptions import AiogramError
 
 from config import settings
 from database import db_commands as db
-# ⬇️ Обновленные импорты клавиатур
-from keyboards import get_admin_menu_kb, get_back_to_admin_kb, get_admin_stats_kb
+from keyboards import get_admin_menu_kb, get_back_to_admin_kb, get_admin_stats_kb, get_broadcast_confirmation_kb
 
 
 # Кастомный фильтр для проверки ID админа
@@ -29,9 +28,10 @@ router.message.filter(IsAdmin())
 router.callback_query.filter(IsAdmin())
 
 
-# --- FSM для рассылки ---
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
+    waiting_for_confirmation = State()
+
 
 
 async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: int = 0):
@@ -59,7 +59,6 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
             await update_obj.answer()
         return
 
-    # --- 1. Считаем общую статистику (для хедера) ---
     total_active = len(active_keys)
     server_stats = defaultdict(int)
     for key in active_keys:
@@ -69,15 +68,13 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
             server_address = "Unknown"
         server_stats[server_address] += 1
 
-
     server_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
 
     def _get_flag_for_country(country_name: str) -> str:
-        """Вспомогательная функция для получения флага (как в keyboards.py)"""
         if country_name == "Финляндия": return "🇫🇮"
         if country_name == "Германия": return "🇩🇪"
         if country_name == "Нидерланды": return "🇳🇱"
-        return "🏳️"  # Флаг по умолчанию
+        return "🏳️"
 
     summary = f"📊 **Общая статистика**\n\n"
     summary += f"Всего активных ключей: **{total_active}**\n"
@@ -86,15 +83,10 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
     sorted_servers = sorted(server_stats.items(), key=lambda item: item[1], reverse=True)
 
     for server_ip, count in sorted_servers:
-        # Получаем страну по IP
         country = server_to_country.get(server_ip, "Unknown")
-        # Получаем флаг по стране
         flag = _get_flag_for_country(country)
-        # Добавляем флаг в строку
         summary += f"  - {flag} `{server_ip}`: **{count}** шт.\n"
 
-
-    # --- 2. Готовим пагинацию (по 5 шт) ---
     page_size = 5
     total_pages = math.ceil(total_active / page_size)
     page = max(0, min(page, total_pages - 1))
@@ -103,7 +95,6 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
     end_index = start_index + page_size
     keys_on_page = active_keys[start_index:end_index]
 
-    # --- 3. Собираем детальный отчет ДЛЯ ЭТОЙ СТРАНИЦЫ ---
     detailed_report = "📈 **Детальный отчет по активным ключам:**\n\n"
     if not keys_on_page and total_active > 0:
         detailed_report += "На этой странице ключей нет."
@@ -132,21 +123,19 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
             f"  - ⏰ Истекает: {expires_str}\n\n"
         )
 
-    # --- 4. Собираем финальный текст и клавиатуру ---
     page_indicator = ""
     if total_pages > 1:
         page_indicator = f"\n\n📄 Страница {page + 1} / {total_pages}"
 
-    final_text = summary + detailed_report + page_indicator
+    final_text = summary + "\n<pre>---------------------------------</pre>\n" + detailed_report + page_indicator
 
     kb = get_admin_stats_kb(page, total_pages)
 
-    # --- 5. Отправляем или редактируем ---
     try:
         if isinstance(update_obj, Message):
-            await update_obj.answer(final_text, reply_markup=kb, parse_mode="Markdown")
+            await update_obj.answer(final_text, reply_markup=kb, parse_mode="HTML")
         else:
-            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="Markdown")
+            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="HTML")
             await update_obj.answer()
 
     except AiogramError as e:
@@ -192,25 +181,71 @@ async def start_broadcast(message: Message, state: FSMContext):
 
 
 @router.message(BroadcastState.waiting_for_message)
-async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
-    """Выполняет рассылку"""
-    await state.clear()
-    user_ids = await db.get_all_user_ids()
-    await message.answer(f"Начинаю рассылку... Всего пользователей: {len(user_ids)}")
+async def process_broadcast_get_message(message: Message, state: FSMContext):
+    """
+    Шаг 1: Получает сообщение от админа и просит подтверждения.
+    """
 
+    await state.update_data(message_to_send_id=message.message_id, chat_id=message.chat.id)
+    await state.set_state(BroadcastState.waiting_for_confirmation)
+
+    await message.answer(
+        "Вы уверены, что хотите отправить **это** сообщение всем пользователям?",
+        reply_markup=get_broadcast_confirmation_kb(),  #
+        parse_mode="Markdown"
+    )
+
+
+#
+@router.callback_query(BroadcastState.waiting_for_confirmation, F.data.startswith("broadcast:"))
+async def process_broadcast_confirmation(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Шаг 2: Обрабатывает нажатие 'Да' или 'Отмена'.
+    """
+    action = callback.data.split(":")[-1]
+
+    if action == "cancel":
+        await state.clear()
+        await callback.message.edit_text("❌ Рассылка отменена.", reply_markup=None)
+        await callback.answer()
+        await cmd_admin(callback.message)
+        return
+
+    await callback.message.edit_text("⏳ Начинаю рассылку... Это может занять время.", reply_markup=None)
+    await callback.answer()
+
+    data = await state.get_data()
+    message_to_send_id = data.get("message_to_send_id")
+    chat_id = data.get("chat_id")
+
+    await state.clear()
+
+    if not message_to_send_id or not chat_id:
+        await callback.message.answer(
+            "❌ Ошибка! Не удалось найти сообщение для рассылки. Попробуйте снова.",
+            reply_markup=get_back_to_admin_kb()
+        )
+        return
+
+    user_ids = await db.get_all_user_ids()
     success_count = 0
     fail_count = 0
 
     for user_id in user_ids:
         try:
-            await message.copy_to(user_id)
+            #
+            await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=chat_id,
+                message_id=message_to_send_id
+            )
             success_count += 1
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1)  #
         except Exception as e:
             fail_count += 1
             logging.warning(f"Failed to send broadcast to {user_id}: {e}")
 
-    await message.answer(
+    await callback.message.answer(
         f"✅ Рассылка завершена.\n\n"
         f"Успешно: {success_count}\n"
         f"Заблокировано/Ошибка: {fail_count}",
@@ -218,7 +253,6 @@ async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
     )
 
 
-# --- ОБРАБОТЧИКИ КНОПОК АДМИН-ПАНЕЛИ ---
 
 @router.callback_query(F.data == "admin:main")
 async def menu_admin_main(callback: CallbackQuery):
@@ -243,12 +277,10 @@ async def menu_admin_stats(callback: CallbackQuery):
     await build_and_send_stats_page(callback, page=0)
 
 
-# ⬇️ ⬇️ ⬇️ НОВЫЙ ОБРАБОТЧИК ДЛЯ ПАГИНАЦИИ ⬇️ ⬇️ ⬇️
 @router.callback_query(F.data.startswith("admin:stats_page:"))
 async def paginate_admin_stats(callback: CallbackQuery):
     """Пагинация для статистики"""
     try:
-        # data = "admin:stats_page:1" -> split(":")[-1] = "1"
         page = int(callback.data.split(":")[-1])
     except (ValueError, IndexError):
         await callback.answer("Ошибка страницы.", show_alert=True)
@@ -260,7 +292,7 @@ async def paginate_admin_stats(callback: CallbackQuery):
 @router.callback_query(F.data == "admin:broadcast")
 async def menu_admin_broadcast(callback: CallbackQuery, state: FSMContext):
     """Кнопка 'Рассылка'"""
-    await state.set_state(BroadcastState.waiting_for_message)
+    await state.set_state(BroadcastState.waiting_for_message)  #
     try:
         await callback.message.edit_text(
             "Введите сообщение для рассылки всем пользователям:",
@@ -270,4 +302,4 @@ async def menu_admin_broadcast(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logging.warning(f"Error editing message for broadcast: {e}")
         await callback.answer()
-        await start_broadcast(callback.message, state)  # Fallback
+        await start_broadcast(callback.message, state)

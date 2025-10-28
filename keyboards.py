@@ -248,3 +248,15 @@ def get_admin_stats_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад в админ-меню", callback_data="admin:main")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_broadcast_confirmation_kb() -> InlineKeyboardMarkup:
+    """Клавиатура для подтверждения рассылки."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, отправить", callback_data="broadcast:confirm"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast:cancel")
+            ]
+        ]
+    )
