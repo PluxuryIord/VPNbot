@@ -1,5 +1,5 @@
-# handlers/webhook_handlers.py
 import logging
+import json
 from aiohttp import web
 from aiogram import Bot
 from yookassa.domain.notification import WebhookNotification
@@ -7,14 +7,14 @@ from yookassa.domain.notification import WebhookNotification
 from database import db_commands as db
 from utils import handle_payment_logic
 
+log = logging.getLogger(__name__)
+
 
 async def yookassa_webhook_handler(request: web.Request):
     """
     Обработчик вебхуков от ЮKassa.
-    Теперь он ВЫДАЕТ КЛЮЧИ.
     """
     bot: Bot = request.app['bot']
-
     try:
         data = await request.json()
         notification = WebhookNotification(data)
@@ -26,56 +26,105 @@ async def yookassa_webhook_handler(request: web.Request):
 
     if notification.event == "payment.succeeded" and payment.status == "succeeded":
         try:
-            # [cite: 138]
             order_id_str = payment.metadata.get("order_id")
             if not order_id_str:
-                logging.error(f"Webhook error: Order ID not in metadata for payment {payment.id}")
-                return web.Response(status=200)  # Отвечаем 200, ЮKassa не будет повторять
+                logging.error(f"Yookassa Webhook error: Order ID not in metadata for payment {payment.id}")
+                return web.Response(status=200)
 
             order_id = int(order_id_str)
-
-            # 1. Проверяем заказ в нашей БД
             order = await db.get_order_by_id(order_id)
             if not order:
-                logging.error(f"Order {order_id} not found in DB (Webhook).")
+                logging.error(f"Order {order_id} not found in DB (Yookassa Webhook).")
                 return web.Response(status=200)
 
-            # 2. Проверяем, что он еще не оплачен (защита от двойной обработки)
             if order.status == 'paid':
-                logging.warning(f"Order {order_id} is already paid (Webhook).")
+                logging.warning(f"Order {order_id} is already paid (Yookassa Webhook).")
                 return web.Response(status=200)
 
-            # 3. Обновляем статус заказа
             await db.update_order_status(order_id, payment.id, status='paid')
-            logging.info(f"Order {order_id} marked as 'paid' by webhook.")
+            logging.info(f"Order {order_id} marked as 'paid' by Yookassa webhook.")
 
-            # 4. Вызываем универсальную функцию обработки
-            success, message_text = await handle_payment_logic(bot, order, payment)
+            metadata = payment.metadata
+            success, message_text = await handle_payment_logic(bot, order_id, metadata)
 
-            # 5. Отправляем пользователю НОВОЕ СООБЩЕНИЕ с ключом или ошибкой
             await bot.send_message(
                 chat_id=order.user_id,
                 text=message_text,
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
-            logging.info(f"Webhook for order {order_id} completed. Success: {success}")
-
+            logging.info(f"Yookassa Webhook for order {order_id} completed. Success: {success}")
 
         except Exception as e:
-            logging.critical(f"Error processing payment {payment.id} in webhook: {e}")
+            logging.critical(f"Error processing payment {payment.id} in Yookassa webhook: {e}")
             return web.Response(status=200)
 
     elif notification.event == "payment.canceled":
-        try:
-            order_id_str = payment.metadata.get("order_id")
-            if order_id_str:
-                order_id = int(order_id_str)
-                # Помечаем заказ как отмененный в нашей БД
-                await db.update_order_status(order_id, payment.id, status='failed')
-                logging.info(f"Order {order_id} marked as 'failed' (canceled) by webhook.")
-        except Exception as e:
-            logging.warning(f"Error processing payment.canceled webhook: {e}")
+        pass
 
-    # Обязательно отвечаем 200 OK
+    return web.Response(status=200)
+
+
+async def crypto_bot_webhook_handler(request: web.Request):
+    """
+    Обработчик вебхуков от Crypto Bot.
+    """
+    bot: Bot = request.app['bot']
+
+    try:
+        data = await request.json()
+        log.info(f"Crypto Bot Webhook received: {data}")
+
+        if data.get("update_type") == "invoice_paid":
+            invoice = data.get("payload", {})
+
+            payload_str = invoice.get("payload")
+            if not payload_str:
+                log.error("Crypto Bot Webhook error: 'payload' (string) not in invoice data")
+                return web.Response(status=200)
+
+            metadata = json.loads(payload_str)
+            order_id_str = metadata.get("order_id")
+
+            if not order_id_str:
+                log.error(
+                    f"Crypto Bot Webhook error: 'order_id' not in payload for invoice {invoice.get('invoice_id')}")
+                return web.Response(status=200)
+
+            try:
+                order_id = int(order_id_str)
+            except (ValueError, TypeError):
+                log.error(f"Crypto Bot Webhook error: Invalid order_id format '{order_id_str}'")
+                return web.Response(status=200)
+
+            order = await db.get_order_by_id(order_id)
+            if not order:
+                log.error(f"Order {order_id} not found in DB (Crypto Webhook).")
+                return web.Response(status=200)
+
+            if order.status == 'paid':
+                logging.warning(f"Order {order_id} is already paid (Crypto Webhook).")
+                return web.Response(status=200)
+
+            invoice_id_str = str(invoice.get('invoice_id'))
+            await db.update_order_status(order_id, invoice_id_str, status='paid')
+            logging.info(f"Order {order_id} marked as 'paid' by Crypto Bot webhook (Invoice: {invoice_id_str}).")
+
+            success, message_text = await handle_payment_logic(bot, order_id, metadata)
+
+            await bot.send_message(
+                chat_id=order.user_id,
+                text=message_text,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+            logging.info(f"Crypto Bot Webhook for order {order_id} completed. Success: {success}")
+
+    except json.JSONDecodeError as e:
+        logging.error(f"Crypto Bot Webhook: Failed to parse JSON body: {e}")
+        return web.Response(status=400)
+    except Exception as e:
+        logging.critical(f"Error processing Crypto Bot webhook: {e}")
+        return web.Response(status=200)
+
     return web.Response(status=200)

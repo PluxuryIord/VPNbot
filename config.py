@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     YOOKASSA_SHOP_ID: SecretStr
     YOOKASSA_SECRET_KEY: SecretStr
 
+    # --- Настройки CryptoBot ---
+    CRYPTO_BOT_TOKEN: SecretStr
+    CRYPTO_BOT_WEBHOOK_PATH: str = "/webhook/cryptobot"
+
     # --- Настройки Вебхуков ---
     WEBHOOK_HOST: Optional[str] = None
     WEBHOOK_PATH: str = "/webhook/yookassa"
@@ -64,6 +68,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+log.info(f"Crypto Bot Token loaded: {'Token loaded' if settings.CRYPTO_BOT_TOKEN else '!!! Token NOT loaded !!!'}")
 
 if not settings.XUI_SERVERS:
     log.critical("!!! КРИТИЧЕСКАЯ ОШИБКА: Конфигурация серверов XUI_SERVERS не загружена. Проверьте .env файл!")

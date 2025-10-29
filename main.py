@@ -1,4 +1,3 @@
-# main.py
 import asyncio
 import logging
 from aiohttp import web
@@ -73,7 +72,7 @@ async def on_shutdown(bot: Bot):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    global log  # Сделаем логгер доступным для on_startup/on_shutdown
+    global log
     log = logging.getLogger(__name__)
 
     bot = Bot(token=settings.BOT_TOKEN.get_secret_value())
@@ -98,12 +97,10 @@ async def main():
     SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
-        # secret_token=settings.WEBHOOK_SECRET # Можно добавить секрет для доп. безопасности
     ).register(app, path=TELEGRAM_WEBHOOK_PATH)
 
-    # Регистрируем обработчик для вебхуков ЮKassa (если он нужен)
-    # Убедись, что функция yookassa_webhook_handler существует в webhook_handlers.py
     app.router.add_post(YOOKASSA_WEBHOOK_PATH, webhook_handlers.yookassa_webhook_handler)
+    app.router.add_post(settings.CRYPTO_BOT_WEBHOOK_PATH, webhook_handlers.crypto_bot_webhook_handler)
 
     # Связываем aiohttp приложение с диспетчером aiogram
     setup_application(app, dp, bot=bot)

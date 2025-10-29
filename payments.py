@@ -65,7 +65,7 @@ async def create_yookassa_payment(amount: float, description: str, order_id: int
 
 async def check_yookassa_payment(payment_id: str):
     """
-    [cite_start]Проверяет статус платежа в ЮKassa по его ID. [cite: 177]
+    Проверяет статус платежа в ЮKassa по его ID.
     """
     try:
         payment_info = Payment.find_one(payment_id)

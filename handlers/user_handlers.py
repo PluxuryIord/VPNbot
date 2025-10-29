@@ -1,6 +1,8 @@
 import datetime
 import logging
 import math
+import crypto_pay
+import json
 
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -111,7 +113,7 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
     """Обрабатывает нажатие на кнопку 'Пробный период'."""
     user_id = callback.from_user.id
     log.info(f"Пользователь {user_id} запросил пробный период.")
-    await callback.answer("⏳ Проверяю возможность выдачи...")  # Ответ-заглушка
+    await callback.answer("⏳ Проверяю возможность выдачи...")
 
     success, result_data = await issue_trial_key(bot, user_id)
 
@@ -133,8 +135,6 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
-        # Можно опционально отредактировать исходное меню, убрав кнопку триала, но проще оставить как есть
-        # await callback.message.edit_reply_markup(reply_markup=get_main_menu_kb()) # Пример
 
     # --- Если НЕ УДАЛОСЬ (уже получал или ошибка) ---
     else:
@@ -146,7 +146,7 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
                 "Чтобы продолжить пользоваться VPN, пожалуйста, выберите и оплатите один из наших тарифов в главном меню (кнопка \"🛒 Купить VPN\").",
                 parse_mode="Markdown"
             )
-            await callback.answer()  # Просто закрываем часики
+            await callback.answer()
         else:
             # Для других ошибок показываем alert
             await callback.answer(error_message, show_alert=True)
@@ -268,7 +268,7 @@ async def menu_key_details(callback: CallbackQuery):
         await callback.answer("Ошибка получения ключа.", show_alert=True)
         return
 
-    await callback.answer()  # Снимаем часики
+    await callback.answer()
 
     # Получаем ключ из БД по ID
     key = await db.get_key_by_id(key_id)
@@ -517,11 +517,9 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
         amount=product.price
     )
 
-    # 2. Показываем ВЫБОР СПОСОБА ОПЛАТЫ
     kb = get_payment_method_kb(order_id, country)
 
     try:
-        # Редактируем текущее сообщение
         await callback.message.edit_text(
             f"Вы выбрали: **{product.name} ({country})**\n"
             f"Сумма к оплате: **{product.price} руб.**\n\n"
@@ -530,14 +528,15 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
             parse_mode="Markdown"
         )
     except Exception as e:
-        log.error(f"Ошибка при показе выбора способа оплаты: {e}")
+        log.error(f"Ошибка при показе выбора спососа оплаты: {e}")
         await callback.answer("Не удалось обновить меню. Попробуйте снова.")
 
 
+#
 @router.callback_query(F.data.startswith("pay_method:"))
 async def process_payment_method(callback: CallbackQuery, bot: Bot):
     """
-    Обработка нажатия на кнопку способа оплаты (Карта или СБП).
+    Обработка нажатия на кнопку способа оплаты (ЮKassa или Crypto).
     Шаг 2: Создает ссылку на оплату и отправляет ее НОВЫМ сообщением.
     """
     await callback.answer("⏳ Создаю ссылку на оплату...")
@@ -550,14 +549,11 @@ async def process_payment_method(callback: CallbackQuery, bot: Bot):
         await callback.answer("Ошибка! Не удалось обработать способ оплаты.", show_alert=True)
         return
 
-    # 1. Получаем заказ из БД
     order = await db.get_order_by_id(order_id)
     if not order or order.user_id != callback.from_user.id:
         await callback.answer("Заказ не найден!", show_alert=True)
         return
 
-    # 2. Не даем создавать новую ссылку, если платеж уже в процессе
-    # (кроме 'failed', но для простоты блокируем все, кроме 'pending')
     if order.status != 'pending':
         await callback.answer("Платеж по этому заказу уже создан или обработан.", show_alert=True)
         return
@@ -567,55 +563,59 @@ async def process_payment_method(callback: CallbackQuery, bot: Bot):
         await callback.answer("Ошибка: Тариф не найден для этого заказа.", show_alert=True)
         return
 
-    # 3. Устанавливаем способ оплаты в зависимости от кнопки
-    payment_method_data = None
-    description_suffix = " (Карта/ЮMoney)"
-    if method == "sbp":
-        # Это заставит ЮKassa показать ТОЛЬКО СБП
-        payment_method_data = {"type": "sbp"}
-        description_suffix = " (СБП)"
+    metadata = {
+        "order_id": str(order_id), #
+        "country": product.country or "Unknown",
+        "renewal_key_id": None #
+    }
 
-    # 4. Создаем счет в ЮKassa
+    payment_url = None
+    payment_id = None
+    payment_system_name = ""
+
     try:
-        country = product.country
-        if not country:  # На случай, если у тарифа NULL country (общий)
-            # Пытаемся вытащить страну из metadata заказа, если она там есть
-            # (В нашем коде ее там нет, берем из продукта - product.country)
-            # Если и там нет, ставим "Unknown"
-            country = "Unknown"
+        if method == "yookassa":
+            payment_system_name = "ЮKassa"
+            payment_url, payment_id = await create_yookassa_payment(
+                amount=product.price,
+                description=f"Оплата '{product.name}' ({metadata['country']}) (Заказ #{order_id})",
+                order_id=order_id,
+                metadata=metadata
+            )
 
-        metadata = {"country": country}
+        elif method == "crypto":
+            payment_system_name = "Crypto Bot"
+            #
+            #
+            payment_url = await crypto_pay.create_crypto_invoice(
+                amount_rub=product.price,
+                currency="RUB",
+                order_id=order_id,
+                metadata=metadata
+            )
+            payment_id = f"crypto_{order_id}"
 
-        payment_url, payment_id = await create_yookassa_payment(
-            amount=product.price,
-            description=f"Оплата '{product.name}' ({country}){description_suffix} (Заказ #{order_id})",
-            order_id=order_id,
-            metadata=metadata,
-            payment_method_data=payment_method_data  # ⬅️ ГЛАВНОЕ ИЗМЕНЕНИЕ
-        )
+        if not payment_url:
+            raise Exception(f"Не удалось сгенерировать ссылку на оплату для {payment_system_name}")
+
     except Exception as e:
-        log.error(f"Ошибка создания счета ЮKassa (метод {method}) для заказа {order_id}: {e}")
-        await callback.answer("Не удалось создать счет в ЮKassa. Попробуйте другой способ.", show_alert=True)
+        log.error(f"Ошибка создания счета {payment_system_name} для заказа {order_id}: {e}")
+        await callback.answer(f"Не удалось создать счет в {payment_system_name}. Попробуйте другой способ.", show_alert=True)
         return
 
-    # 5. Обновляем заказ, добавляя payment_id
     await db.update_order_status(order_id, payment_id, status='pending')
 
-    # 6. Отправляем ссылку на оплату НОВЫМ СООБЩЕНИЕМ
-    # (Используем get_payment_kb из keyboards.py) [cite_start][cite: 105]
     kb = get_payment_kb(payment_url, order_id)
 
     try:
-        # Отправляем НОВОЕ сообщение с оплатой
         await callback.message.answer(
-            f"Ваша ссылка на оплату (Счет: {description_suffix}):\n"
-            f"Тариф: **{product.name} ({country})**\n"
+            f"Ваша ссылка на оплату ({payment_system_name}):\n"
+            f"Тариф: **{product.name} ({metadata['country']})**\n"
             f"Сумма: **{product.price} руб.**\n\n"
             "Нажмите кнопку ниже, чтобы перейти к оплате:",
             reply_markup=kb,
             parse_mode="Markdown"
         )
-        # И удаляем сообщение с выбором способа
         await callback.message.delete()
     except Exception as e:
         log.error(f"Ошибка при отправке/удалении сообщения об оплате: {e}")
@@ -625,7 +625,7 @@ async def process_payment_method(callback: CallbackQuery, bot: Bot):
 async def process_check_payment(callback: CallbackQuery, bot: Bot):
     """
     Обработка нажатия на кнопку "Проверить оплату".
-    Теперь использует универсальную функцию handle_payment_logic.
+    (Версия с авто-вебхуками)
     """
     order_id = int(callback.data.split(":")[1])
 
@@ -634,55 +634,22 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
         await callback.answer("Заказ не найден!", show_alert=True)
         return
 
-    # 1. Проверяем, может пользователь нажал кнопку снова ПОСЛЕ успешной оплаты
     if order.status == 'paid':
-        await callback.answer("Этот заказ уже оплачен. Ключ должен быть у вас в сообщениях.", show_alert=True)
+        await callback.answer("Этот заказ уже оплачен. Ключ должен был прийти в чат.", show_alert=True)
         return
 
-    if not order.payment_id:
-        await callback.answer("Ошибка: ID платежа не найден для этого заказа.", show_alert=True)
-        return
-
-    # 2. Запрашиваем статус в ЮKassa [cite: 177]
-    payment_info = await check_yookassa_payment(order.payment_id)
-    if not payment_info:
-        await callback.answer("Не удалось проверить статус платежа в ЮKassa.", show_alert=True)
-        return
-
-    # --- Платеж УСПЕШЕН ---
-    if payment_info.status == 'succeeded':
-        await callback.answer("✅ Оплата найдена! Обрабатываю...")
-
-        # 3. Обновляем статус в БД (на случай, если вебхук еще не дошел)
-        await db.update_order_status(order_id, order.payment_id, status='paid')
-
-        # 4. Вызываем ту же универсальную функцию, что и вебхук
-        success, message_text = await handle_payment_logic(bot, order, payment_info)
-
-        # 5. РЕДАКТИРУЕМ текущее сообщение, показывая результат
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]
-        ])
-        if success:
-            # Добавляем кнопку "Мои ключи" при успехе
-            kb.inline_keyboard.insert(0, [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
-
-        await callback.message.edit_text(
-            message_text,
-            reply_markup=kb,
-            parse_mode="Markdown",
-            disable_web_page_preview=True
-        )
-
-    # --- Платеж НЕ УСПЕШЕН ---
-    elif payment_info.status == 'pending':
-        await callback.answer("Платеж еще не поступил. Попробуйте через минуту.", show_alert=True)
-
-    elif payment_info.status in ('canceled', 'waiting_for_capture'):
-        await callback.answer(f"Платеж отменен или ожидает подтверждения (статус: {payment_info.status}).",
-                              show_alert=True)
-        await db.update_order_status(order_id, order.payment_id, status='failed')
+    if order.status == 'pending':
+        if order.payment_id and not order.payment_id.startswith("crypto_"):
+            await callback.answer("Проверяю ЮKassa... Пожалуйста, подождите.", show_alert=True)
+            payment_info = await check_yookassa_payment(order.payment_id)
+            if payment_info and payment_info.status == 'succeeded':
+                metadata = payment_info.metadata
+                success, message_text = await handle_payment_logic(bot, order_id, metadata)
+                await callback.message.edit_text(message_text, parse_mode="Markdown")
+            else:
+                await callback.answer("Платеж в ЮKassa еще не прошел.", show_alert=True)
+        else:
+             await callback.answer("Платеж еще не поступил. Пожалуйста, ожидайте, бот пришлет ключ автоматически после оплаты.", show_alert=True)
 
     else:
-        log.warning(f"Неожиданный статус платежа {payment_info.id}: {payment_info.status}")
-        await callback.answer(f"Неизвестный статус платежа: {payment_info.status}", show_alert=True)
+        await callback.answer(f"Статус заказа: {order.status}. Обратитесь в поддержку.", show_alert=True)

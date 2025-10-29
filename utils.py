@@ -6,12 +6,12 @@ from typing import Optional, Dict
 from aiogram import Bot
 from urllib.parse import quote
 
-from yookassa import Payment
+# from yookassa import Payment
 
 from config import settings, XuiServer
 from database import db_commands as db
 import vpn_api
-from database.models import Orders
+# from database.models import Orders
 
 log = logging.getLogger(__name__)
 
@@ -240,18 +240,21 @@ async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
         return False, "Не удалось выдать пробный ключ. Попробуйте позже или свяжитесь с поддержкой."
 
 
-async def handle_payment_logic(bot: Bot, order: Orders, payment_info: Payment) -> tuple[bool, str]:
+async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple[bool, str]:
     """
-    Универсальная логика обработки УСПЕШНОГО платежа.
-    Вызывается и вебхуком, и кнопкой "Проверить".
+    Универсальная логика обработки УСПЕШНОГО платежа (и ЮKassa, и Crypto).
+    Принимает order_id и dict с metadata.
     Возвращает (Успех, Текст сообщения для пользователя).
     """
     try:
-        metadata = payment_info.metadata
+        order = await db.get_order_by_id(order_id)
+        if not order:
+            log.error(f"[PaymentLogic] Ошибка: Заказ {order_id} не найден.")
+            return False, "Ошибка: Заказ не найден."
+
         renewal_key_id_str = metadata.get("renewal_key_id")
         user_id = order.user_id
         product_id = order.product_id
-        order_id = order.id
 
         # --- ЛОГИКА ПРОДЛЕНИЯ ---
         if renewal_key_id_str:
@@ -262,8 +265,7 @@ async def handle_payment_logic(bot: Bot, order: Orders, payment_info: Payment) -
             product = await db.get_product_by_id(product_id)
 
             if not key_to_renew or not product or key_to_renew.user_id != user_id:
-                log.error(
-                    f"Ошибка продления: Ключ {renewal_key_id} или продукт {product_id} не найден/не принадлежит пользователю {user_id} для заказа {order_id}.")
+                log.error(f"Ошибка продления: Ключ {renewal_key_id} или продукт {product_id} не найден/не принадлежит пользователю {user_id} для заказа {order_id}.")
                 raise ValueError("Ключ или продукт для продления не найден или не принадлежит вам.")
 
             now = datetime.datetime.now()
@@ -271,7 +273,6 @@ async def handle_payment_logic(bot: Bot, order: Orders, payment_info: Payment) -
             new_expiry_date = start_date + datetime.timedelta(days=product.duration_days)
 
             await db.update_key_expiry(renewal_key_id, new_expiry_date)
-            # (Опционально: можно добавить вызов API vpn_api для обновления на сервере X-UI [cite: 115])
             log.info(f"Ключ {renewal_key_id} продлен до {new_expiry_date}.")
 
             message_text = (
@@ -286,22 +287,18 @@ async def handle_payment_logic(bot: Bot, order: Orders, payment_info: Payment) -
             log.info(f"[PaymentLogic] Заказ {order_id} определен как НОВАЯ ПОКУПКА.")
             country = metadata.get("country")
 
-            # Аварийный механизм определения страны
             if not country:
-                log.error(f"!!! ОШИБКА: Не найдена страна в metadata платежа {payment_info.id} для заказа {order_id}")
+                log.error(f"!!! ОШИБКА: Не найдена страна в metadata для заказа {order_id}")
                 product_for_country = await db.get_product_by_id(product_id)
                 if product_for_country and product_for_country.country:
                     country = product_for_country.country
-                    log.warning(f"Страна '{country}' восстановлена по Product ID {product_id}")
                 else:
                     country = settings.XUI_SERVERS[0].country if settings.XUI_SERVERS else "Unknown"
-                    log.warning(f"Страна не найдена, используется страна первого сервера: '{country}'")
+                log.warning(f"Страна '{country}' восстановлена по Product ID {product_id}")
 
                 if country == "Unknown":
-                    await db.update_order_status(order_id, payment_info.id, status='failed')
                     return False, "Критическая ошибка: Не удалось определить страну сервера. Свяжитесь с поддержкой."
 
-            # Вызываем функцию выдачи ключа
             success, vless_string = await issue_key_to_user(
                 bot=bot,
                 user_id=user_id,
@@ -322,8 +319,6 @@ async def handle_payment_logic(bot: Bot, order: Orders, payment_info: Payment) -
                 )
                 return True, message_text
             else:
-                # Ошибка выдачи (админ уже уведомлен из issue_key_to_user)
-                await db.update_order_status(order_id, payment_info.id, status='failed')
                 message_text = (
                     "❌ **Ошибка выдачи ключа**\n\n"
                     "Оплата прошла, но при создании ключа произошла ошибка.\n"

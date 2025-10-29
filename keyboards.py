@@ -92,8 +92,7 @@ def get_payment_method_kb(order_id: int, country: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Картой / ЮMoney / СБП", callback_data=f"pay_method:default:{order_id}")],
-            # [InlineKeyboardButton(text="⚡ Система Быстрых Платежей (СБП)", callback_data=f"pay_method:sbp:{order_id}")],
-            # Кнопка отмены, чтобы вернуться к выбору тарифа
+            [InlineKeyboardButton(text="💎 Криптовалютой (USDT)", callback_data=f"pay_method:crypto:{order_id}")],
             [InlineKeyboardButton(text="⬅️ Назад к тарифам", callback_data=f"select_country:{country}")]
         ]
     )
@@ -105,11 +104,9 @@ def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size
     """
     keyboard = []
 
-    # Добавляем кнопки для каждого ключа на странице
     if keys_on_page:
         for key in keys_on_page:
-            status_icon = "✅" if key.expires_at > datetime.datetime.now() else "❌"  # Нужен импорт datetime вверху файла
-            # ❗️ Добавим callback_data для детального просмотра (пока заглушка)
+            status_icon = "✅" if key.expires_at > datetime.datetime.now() else "❌"
             keyboard.append([
                 InlineKeyboardButton(
                     text=f"{status_icon} Ключ (до {key.expires_at.strftime('%d.%m.%Y')})",
