@@ -6,18 +6,40 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import settings
 
 
-# def get_main_menu_kb() -> InlineKeyboardMarkup:
-#     return InlineKeyboardMarkup(
-#         inline_keyboard=[
-#             [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
-#             [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
-#             [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
-#             [
-#                 InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
-#                 InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
-#             ],
-#         ]
-#     )
+def _get_flag_for_country(country_name: str) -> str:
+    """
+    Вспомогательная функция для получения флага страны.
+    """
+    if country_name == "Финляндия":
+        return "🇫🇮"
+    if country_name == "Германия":
+        return "🇩🇪"
+    if country_name == "Нидерланды":
+        return "🇳🇱"
+    return "🏳️"  # Флаг по умолчанию
+
+
+def get_main_menu_kb(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Генерирует главное меню.
+    Для админов добавляет кнопку "Админ-панель".
+    """
+    keyboard = [
+        [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
+        [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
+        [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
+        [
+            InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
+            InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
+        ],
+    ]
+
+    if user_id in settings.get_admin_ids:
+        keyboard.insert(1, [
+            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin:main")
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_country_selection_kb() -> InlineKeyboardMarkup:
@@ -44,7 +66,6 @@ def get_country_selection_kb() -> InlineKeyboardMarkup:
     for i in range(0, len(buttons), 2):
         keyboard.append(buttons[i:i + 2])
 
-    # Добавляем кнопку "Назад"
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -54,12 +75,12 @@ def get_instruction_platforms_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📱 Android", url="https://teletype.in/@coid_siemens/0BKy1e3yrgt"),
-                InlineKeyboardButton(text="🍎 iPhone", url="https://teletype.in/@coid_siemens/3vXPZr2S0Kn"),
+                InlineKeyboardButton(text="📱 Android", callback_data="instruction:android"),
+                InlineKeyboardButton(text="🍎 iPhone", callback_data="instruction:ios"),
             ],
             [
-                InlineKeyboardButton(text="💻 Windows", url="https://teletype.in/@coid_siemens/JnYNn8TyoDG"),
-                InlineKeyboardButton(text="🍏 Mac", url="https://teletype.in/@coid_siemens/UVA_Tk0VyQK"),
+                InlineKeyboardButton(text="💻 Windows", callback_data="instruction:windows"),
+                InlineKeyboardButton(text="🍏 Mac", callback_data="instruction:macos"),
             ],
             [InlineKeyboardButton(
                 text="⚙️ Настройка исключений",
@@ -80,18 +101,24 @@ def get_back_to_instructions_kb() -> InlineKeyboardMarkup:
 
 
 def get_payment_kb(payment_url: str, order_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для ссылки на оплату (без кнопки "Отмена")
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
-            [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"check_payment:{order_id}")],
+            [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"check_payment:{order_id}")]
         ]
     )
 
 
 def get_payment_method_kb(order_id: int, country: str) -> InlineKeyboardMarkup:
+    """
+    Клавиатура выбора способа оплаты (ЮKassa / Crypto).
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Картой / ЮMoney / СБП", callback_data=f"pay_method:default:{order_id}")],
+            [InlineKeyboardButton(text="💳 Картой / ЮMoney / СБП", callback_data=f"pay_method:yookassa:{order_id}")],
             [InlineKeyboardButton(text="💎 Криптовалютой (USDT)", callback_data=f"pay_method:crypto:{order_id}")],
             [InlineKeyboardButton(text="⬅️ Назад к тарифам", callback_data=f"select_country:{country}")]
         ]
@@ -103,41 +130,79 @@ def get_my_keys_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size
     Генерирует клавиатуру для 'Мои ключи' с пагинацией.
     """
     keyboard = []
-
+    server_ip_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
     if keys_on_page:
+        now = datetime.datetime.now()
         for key in keys_on_page:
-            status_icon = "✅" if key.expires_at > datetime.datetime.now() else "❌"
+
+            country = "Unknown"
+            flag = "🏳️"
+            try:
+                server_ip = key.vless_key.split('@')[1].split(':')[0]
+                country = server_ip_to_country.get(server_ip, "")  #
+            except Exception:
+                pass
+
+            flag = _get_flag_for_country(country)
+            if key.expires_at > now:
+                status_icon = "✅"
+                remaining = key.expires_at - now
+                days_left = remaining.days
+
+                if days_left > 0:
+                    time_left = f"(Осталось {days_left} д.)"
+                else:
+                    hours_left = remaining.seconds // 3600
+                    if hours_left > 0:
+                        time_left = f"(Осталось {hours_left} ч.)"
+                    else:
+                        time_left = "(Меньше часа)"
+            else:
+                status_icon = "❌"
+                time_left = f"(Истек {key.expires_at.strftime('%d.%m')})"
+
+            btn_text = f"{status_icon} Ключ {country} {flag} {time_left}"
+
             keyboard.append([
                 InlineKeyboardButton(
-                    text=f"{status_icon} Ключ (до {key.expires_at.strftime('%d.%m.%Y')})",
+                    text=btn_text,
                     callback_data=f"key_details:{key.id}:{page}"
-                    # callback_data="key_details"  # Временно
                 )
             ])
 
-    # --- Кнопки пагинации ---
     total_pages = math.ceil(total_keys / page_size)
     nav_row = []
-    # Кнопка "Назад"
+
+    placeholder_btn = InlineKeyboardButton(text=" ", callback_data="ignore")
+
+    # 1. Кнопка "Назад"
     if page > 0:
         nav_row.append(
             InlineKeyboardButton(text="⬅️ Назад", callback_data=f"mykeys_page:{page - 1}")
         )
-    # Индикатор страницы
+    else:
+        nav_row.append(placeholder_btn)  #
+
+    # 2. Индикатор страницы
     if total_pages > 1:
         nav_row.append(
-            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore")  # Кнопка без действия
+            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore")
         )
-    # Кнопка "Вперед"
+    else:
+        nav_row.append(InlineKeyboardButton(text="1/1", callback_data="ignore"))
+
+    # 3. Кнопка "Вперед"
     if page + 1 < total_pages:
         nav_row.append(
             InlineKeyboardButton(text="Вперед ➡️", callback_data=f"mykeys_page:{page + 1}")
         )
+    else:
+        nav_row.append(placeholder_btn)
 
-    if nav_row:
-        keyboard.append(nav_row)  # Добавляем ряд с кнопками навигации
+    if total_pages > 1:
+        keyboard.append(nav_row)
 
-    # Кнопка "Главное меню"
+    #
     keyboard.append([InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -150,7 +215,6 @@ def get_key_details_kb(key_id: int, current_page: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔑 Скопировать ключ", callback_data=f"key_copy:{key_id}:{current_page}"),
             InlineKeyboardButton(text="🔄 Продлить", callback_data=f"key_renew:{key_id}:{current_page}")
         ],
-        # Обновляем callback_data кнопки Назад
         [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"mykeys_page:{current_page}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -159,12 +223,10 @@ def get_key_details_kb(key_id: int, current_page: int) -> InlineKeyboardMarkup:
 def get_support_kb() -> InlineKeyboardMarkup:
     """Клавиатура для раздела Поддержка."""
     keyboard = [
-        # Кнопка-ссылка на оферту
         [InlineKeyboardButton(
             text="📜 Публичная оферта",
             url="https://telegra.ph/PUBLICHNAYA-OFERTA-o-zaklyuchenii-dogovora-ob-okazanii-uslug-10-27-2"
         )],
-        # Кнопка "Назад"
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -190,48 +252,22 @@ def get_back_to_admin_kb() -> InlineKeyboardMarkup:
     )
 
 
-def get_main_menu_kb(user_id: int) -> InlineKeyboardMarkup:
-    """
-    Генерирует главное меню.
-    Для админов добавляет кнопку "Админ-панель".
-    """
-    keyboard = [
-        [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
-        [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
-        [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
-        [
-            InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
-            InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
-        ],
-    ]
-
-    if user_id in settings.get_admin_ids:
-        keyboard.insert(1, [
-            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin:main")
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
 def get_admin_stats_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
     """
     Клавиатура пагинации для статистики админа (по 5 элементов).
     """
     nav_row = []
 
-    # 1. Кнопка "Назад"
     if page > 0:
         nav_row.append(
             InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:stats_page:{page - 1}")
         )
 
-    # 2. Индикатор страницы
     if total_pages > 1:
         nav_row.append(
             InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore")
         )
 
-    # 3. Кнопка "Вперед"
     if page + 1 < total_pages:
         nav_row.append(
             InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin:stats_page:{page + 1}")
@@ -241,7 +277,6 @@ def get_admin_stats_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
     if nav_row:
         keyboard.append(nav_row)
 
-    # 4. Кнопка "Назад в админ-меню"
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад в админ-меню", callback_data="admin:main")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -1,4 +1,5 @@
 import datetime
+import html
 import logging
 import math
 import crypto_pay
@@ -63,6 +64,17 @@ TEXT_MACOS = """
 6. Нажмите "Turn V2ray-core On".
 """
 TEXT_SUPPORT = "По всем вопросам пишите @NjordVPN_Support"
+
+
+def _get_flag_for_country(country_name: str) -> str:
+    """
+    Вспомогательная функция для получения флага страны.
+    (Логика взята из keyboards.py)
+    """
+    if country_name == "Финляндия": return "🇫🇮"
+    if country_name == "Германия": return "🇩🇪"
+    if country_name == "Нидерланды": return "🇳🇱"
+    return "🏳️"
 
 
 @router.message(CommandStart())
@@ -259,9 +271,8 @@ async def menu_keys_paginate(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("key_details:"))
 async def menu_key_details(callback: CallbackQuery):
-    """Показывает детали выбранного ключа."""
+    """Показывает детали выбранного ключа. (Версия со страной)"""
     try:
-        # Парсим ID ключа и номер страницы
         _, key_id_str, page_str = callback.data.split(":")
         key_id = int(key_id_str)
         current_page = int(page_str)
@@ -272,72 +283,115 @@ async def menu_key_details(callback: CallbackQuery):
 
     await callback.answer()
 
-    # Получаем ключ из БД по ID
     key = await db.get_key_by_id(key_id)
 
-    if not key or key.user_id != callback.from_user.id:  # Проверяем, что ключ принадлежит пользователю
+    if not key or key.user_id != callback.from_user.id:
         await callback.answer("Ключ не найден.", show_alert=True)
-        # Вернем пользователя к списку ключей (на первую страницу)
-        # TODO: Лучше возвращать на current_page, но для этого menu_keys_show_first_page нужно переделать
         await menu_keys_show_first_page(callback)
         return
 
-    # Формируем текст с деталями (без изменений)
+    server_ip_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
+    country = "Unknown"
+    flag = "🏳️"
+    try:
+        server_ip = key.vless_key.split('@')[1].split(':')[0]
+        country = server_ip_to_country.get(server_ip, "Unknown")
+        flag = _get_flag_for_country(country)
+    except Exception:
+        pass  #
+
+    server_info = f"{country} {flag}"
     now = datetime.datetime.now()
     if key.expires_at > now:
-        status = "✅ *Активен*";
-        remaining = key.expires_at - now;
-        time_left = f"{remaining.days} дн. {remaining.seconds // 3600} ч."
+        status = "✅ <b>Активен</b>"
+        remaining = key.expires_at - now
+        days = remaining.days
+        hours = remaining.seconds // 3600
+        time_left = f"{days} дн. {hours} ч."
     else:
-        status = "❌ *Истек*";
+        status = "❌ <b>Истек</b>"
         time_left = "0"
 
     text = (
-        f"🔑 **Детали ключа** ({status})\n\n"
-        f"Сервер: `{key.vless_key.split('@')[1].split(':')[0]}`\n"
-        f"Порт: `{key.vless_key.split(':')[2].split('?')[0]}`\n"
-        f"Истекает: `{key.expires_at.strftime('%Y-%m-%d %H:%M')}`\n"
+        f"🔑 <b>Детали ключа</b> ({status})\n\n"
+        f"Сервер: <b>{server_info}</b>\n"
+        f"Истекает: <code>{key.expires_at.strftime('%Y-%m-%d %H:%M')}</code>\n"  # 
         f"Осталось: {time_left}\n\n"
         "Нажмите кнопки ниже для действий."
     )
 
-    # Передаем номер страницы в клавиатуру
     kb = get_key_details_kb(key_id, current_page)
 
     try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except AiogramError:
         pass
 
 
 @router.callback_query(F.data.startswith("key_copy:"))
 async def menu_key_copy(callback: CallbackQuery):
-    """Отправляет ключ пользователю для копирования."""
+    """
+    Редактирует сообщение, показывая VLESS-ключ.
+    """
     try:
-        # Парсим ID ключа (страницу можно игнорировать)
-        _, key_id_str, _ = callback.data.split(":")
+        _, key_id_str, page_str = callback.data.split(":")
         key_id = int(key_id_str)
+        current_page = int(page_str)
     except (IndexError, ValueError):
         log.warning(f"Некорректный callback_data для копирования ключа: {callback.data}")
         await callback.answer("Ошибка получения ключа.", show_alert=True)
         return
 
-    # Получаем ключ по ID
     key = await db.get_key_by_id(key_id)
 
     if not key or key.user_id != callback.from_user.id:
         await callback.answer("Ключ не найден.", show_alert=True)
         return
 
+    server_ip_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
+    country = "Unknown"
+    flag = "🏳️"
     try:
-        await callback.message.answer(
-            f"Ваш ключ (нажмите для копирования):\n\n<code>{key.vless_key}</code>",
-            parse_mode="HTML"
-        )
-        await callback.answer("Ключ отправлен в чат!", show_alert=True)
+        server_ip = key.vless_key.split('@')[1].split(':')[0]
+        country = server_ip_to_country.get(server_ip, "Unknown")
+        flag = _get_flag_for_country(country)
+    except Exception:
+        pass
+    server_info = f"{country} {flag}"
+
+    now = datetime.datetime.now()
+    if key.expires_at > now:
+        status = "✅ <b>Активен</b>"
+        remaining = key.expires_at - now
+        days = remaining.days
+        hours = remaining.seconds // 3600
+        time_left = f"{days} дн. {hours} ч."
+    else:
+        status = "❌ <b>Истек</b>"
+        time_left = "0"
+
+    text = (
+        f"🔑 <b>Детали ключа</b> ({status})\n\n"
+        f"Сервер: <b>{server_info}</b>\n"
+        f"Истекает: <code>{key.expires_at.strftime('%Y-%m-%d %H:%M')}</code>\n"
+        f"Осталось: {time_left}\n\n"
+        "⬇️ <b>Ваш ключ (нажмите, чтобы скопировать):</b> ⬇️\n"
+        f"<code>{html.escape(key.vless_key)}</code>"
+    )
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Продлить", callback_data=f"key_renew:{key_id}:{current_page}")],
+            [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"mykeys_page:{current_page}")]
+        ]
+    )
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await callback.answer("Ключ показан.", show_alert=True)
     except Exception as e:
-        log.error(f"Ошибка при отправке ключа {key_id} пользователю {callback.from_user.id}: {e}")
-        await callback.answer("Не удалось отправить ключ.", show_alert=True)
+        log.error(f"Ошибка при редактировании сообщения для показа ключа {key_id}: {e}")
+        await callback.answer("Не удалось показать ключ.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("key_renew:"))
