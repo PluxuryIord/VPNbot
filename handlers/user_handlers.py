@@ -102,11 +102,13 @@ async def cmd_start(message: Message):
 async def menu_main(callback: CallbackQuery):
     """Главное меню (инлайн)."""
     await callback.message.edit_text(
-        "👋 Привет!\n\n"
-        "Наш основной канал 👉 https://t.me/NjordVPN\n"
-        "Я бот для продажи VPN-ключей. "
-        "Выбери действие в меню:",
-        reply_markup=get_main_menu_kb(user_id=callback.from_user.id)
+        f"👋 Привет, {callback.from_user.full_name}!\n\n"
+        "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
+        "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
+        "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
+        "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
+        reply_markup=get_main_menu_kb(user_id=callback.from_user.id),
+        parse_mode="Markdown"
     )
 
 
