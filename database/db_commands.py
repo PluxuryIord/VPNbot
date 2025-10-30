@@ -18,10 +18,10 @@ async def init_db():
         await conn.run_sync(metadata.create_all)
 
 
-async def get_or_create_user(user_id: int, username: str, first_name: str) -> tuple[bool, bool]:
+async def get_or_create_user(user_id: int, username: str, first_name: str) -> int | None:
     """
     Добавляет нового пользователя, если его нет.
-    Возвращает кортеж: (user_created: bool, has_received_trial: bool)
+    Возвращает last_menu_id (int) или None.
     """
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -36,14 +36,27 @@ async def get_or_create_user(user_id: int, username: str, first_name: str) -> tu
                         user_id=user_id,
                         username=username,
                         first_name=first_name,
-                        has_received_trial=False # Явно указываем при создании
+                        has_received_trial=False,
+                        last_menu_id=None #
                     )
                 )
                 await session.commit()
-                return True, False # Создан, триал не получал
+                return None #
             else:
-                # Возвращаем статус триала существующего пользователя
-                return False, user.has_received_trial # Не создан, статус триала
+                #
+                return user.last_menu_id #
+
+
+async def update_user_menu_id(user_id: int, message_id: int):
+    """Обновляет ID последнего меню пользователя."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                update(Users)
+                .where(Users.c.user_id == user_id)
+                .values(last_menu_id=message_id)
+            )
+            await session.commit()
 
 
 async def get_products(country: str | None = None):

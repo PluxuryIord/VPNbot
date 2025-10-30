@@ -17,10 +17,13 @@ from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platform
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
+from middlewares.throttling import ThrottlingMiddleware
 
 log = logging.getLogger(__name__)
 router = Router()
 
+# router.message.filter(CommandStart()).middleware(ThrottlingMiddleware(rate_limit=1.0))
+router.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
 TEXT_INSTRUCTION_MENU = "ℹ️ **Инструкция**\n\nВыберите вашу операционную систему:"
 TEXT_ANDROID = """
 📱 **Инструкция для Android (V2Box):**
@@ -77,23 +80,59 @@ def _get_flag_for_country(country_name: str) -> str:
     return "🏳️"
 
 
+async def _handle_old_menu(bot: Bot, user_id: int, last_menu_id: int | None):
+    """Пытается удалить старое меню. Если не вышло - редактирует."""
+    if not last_menu_id:
+        return  #
+
+    try:
+        # 1.
+        await bot.delete_message(chat_id=user_id, message_id=last_menu_id)
+    except AiogramError as e:
+        # 2.
+        if "message to delete not found" in str(e) or "message can't be deleted" in str(e):
+            try:
+                # 3.
+                await bot.edit_message_text("🗑️", chat_id=user_id, message_id=last_menu_id)
+            except Exception as e_edit:
+                log.info(
+                    f"Не удалось ни удалить, ни отредактировать старое меню {last_menu_id} для {user_id}: {e_edit}")
+        else:
+            log.info(f"Не удалось удалить старое меню {last_menu_id} для {user_id}: {e}")
+
+
+
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message):
-    """Обработчик /start"""
-    await db.get_or_create_user(
+async def cmd_start(message: Message, bot: Bot):  #
+    """Обработчик /start (Версия с удалением старого меню)"""
+
+    try:
+        await message.delete()
+    except AiogramError as e:
+        log.info(f"Не удалось удалить /start сообщение {message.message_id} от {message.from_user.id}: {e}")
+
+    # 1.
+    last_menu_id = await db.get_or_create_user(
         user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.full_name
     )
-    await message.answer(
+
+    await _handle_old_menu(bot, message.from_user.id, last_menu_id)
+
+    new_menu_message = await message.answer(
         f"👋 Привет, {message.from_user.full_name}!\n\n"
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
         "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
         reply_markup=get_main_menu_kb(user_id=message.from_user.id),
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        disable_web_page_preview=True
     )
+    await db.update_user_menu_id(message.from_user.id, new_menu_message.message_id)
 
 
 # === Инлайн-навигация ===

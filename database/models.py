@@ -22,7 +22,8 @@ Users = Table(
     Column('username', String(255), nullable=True),
     Column('first_name', String(255)),
     Column('created_at', DateTime, server_default=func.now()),
-    Column('has_received_trial', Boolean, nullable=False, default=False, server_default='false')
+    Column('has_received_trial', Boolean, nullable=False, default=False, server_default='false'),
+    Column('last_menu_id', BigInteger, nullable=True, default=None)
 )
 
 # Таблица продуктов (тарифов)
