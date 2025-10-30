@@ -4,7 +4,11 @@ from sqlalchemy import select, insert, update, func
 from database.models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
 import datetime
 
-engine = create_async_engine(DB_URL)
+engine = create_async_engine(
+    DB_URL,
+    pool_recycle=1800,
+    pool_pre_ping=True
+)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
