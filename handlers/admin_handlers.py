@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import datetime
 import math
@@ -76,8 +77,8 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
         if country_name == "Нидерланды": return "🇳🇱"
         return "🏳️"
 
-    summary = f"📊 **Общая статистика**\n\n"
-    summary += f"Всего активных ключей: **{total_active}**\n"
+    summary = f"📊 <b>Общая статистика</b>\n\n"
+    summary += f"Всего активных ключей: <b>{total_active}</b>\n"
     summary += "Распределение по серверам (IP/домен):\n"
 
     sorted_servers = sorted(server_stats.items(), key=lambda item: item[1], reverse=True)
@@ -85,7 +86,7 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
     for server_ip, count in sorted_servers:
         country = server_to_country.get(server_ip, "Unknown")
         flag = _get_flag_for_country(country)
-        summary += f"  - {flag} `{server_ip}`: **{count}** шт.\n"
+        summary += f"  - {flag} <code>{server_ip}</code>: <b>{count}</b> шт.\n"
 
     page_size = 5
     total_pages = math.ceil(total_active / page_size)
@@ -95,9 +96,11 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
     end_index = start_index + page_size
     keys_on_page = active_keys[start_index:end_index]
 
-    detailed_report = "📈 **Детальный отчет по активным ключам:**\n\n"
+    detailed_report = "📈 <b>Детальный отчет по активным ключам:</b>\n\n"
     if not keys_on_page and total_active > 0:
         detailed_report += "На этой странице ключей нет."
+
+    now = datetime.datetime.now()  #
 
     for key in keys_on_page:
         server_address = "Unknown"
@@ -109,16 +112,39 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
         except Exception:
             pass
 
-        user_info = f"{key.first_name} (ID: {key.user_id})"
+        user_info = ""
+        if key.username:
+            user_info = f"@{key.username}"
+        else:
+            safe_name = html.escape(key.first_name or f"User {key.user_id}")
+            user_info = f'<a href="tg://user?id={key.user_id}">{safe_name}</a>'
+
         product_info = "Пробный (1 день)"
         if key.product_name:
             product_info = f"{key.product_name} ({key.duration_days} дн.)"
 
-        expires_str = key.expires_at.strftime('%Y-%m-%d %H:%M')
+        expires_dt = key.expires_at
+        expires_str_abs = expires_dt.strftime('%Y-%m-%d %H:%M')
+        relative_str = ""
+
+        if expires_dt > now:
+            remaining = expires_dt - now
+            days = remaining.days
+            hours = remaining.seconds // 3600
+            if days > 0:
+                relative_str = f" (Осталось {days} д.)"
+            elif hours > 0:
+                relative_str = f" (Осталось {hours} ч.)"
+            else:
+                relative_str = f" (Меньше часа)"
+        else:
+            relative_str = " (Истек)"
+
+        expires_str = f"{expires_str_abs} {relative_str}"
 
         detailed_report += (
-            f"👤 **{user_info}**\n"
-            f"  - 🖥️ Сервер: {flag} `{server_address}`\n"
+            f"👤 <b>{user_info}</b>\n"
+            f"  - 🖥️ Сервер: {flag} <code>{server_address}</code>\n"
             f"  - 📦 Тариф: {product_info}\n"
             f"  - ⏰ Истекает: {expires_str}\n\n"
         )
@@ -133,9 +159,9 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
 
     try:
         if isinstance(update_obj, Message):
-            await update_obj.answer(final_text, reply_markup=kb, parse_mode="Markdown")
+            await update_obj.answer(final_text, reply_markup=kb, parse_mode="HTML")
         else:
-            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="Markdown")
+            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="HTML")
             await update_obj.answer()
 
     except AiogramError as e:

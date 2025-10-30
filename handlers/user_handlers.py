@@ -226,7 +226,7 @@ async def menu_keys_show_first_page(callback: CallbackQuery):
     kb = get_my_keys_kb(keys_on_page, total_keys, page=page, page_size=page_size)
 
     total_pages = math.ceil(total_keys / page_size)
-    text = "🔑 **Ваши ключи:**"
+    text = "🔑 **Ваши ключи:**\n\nНажмите на ключ чтобы скопировать его и узнать более подробную информацию"
     if total_pages > 1:
         text += f"\n\n📄 Страница {page + 1} из {total_pages}"
 
@@ -254,7 +254,7 @@ async def menu_keys_paginate(callback: CallbackQuery):
     kb = get_my_keys_kb(keys_on_page, total_keys, page=page, page_size=page_size)
 
     total_pages = math.ceil(total_keys / page_size)
-    text = "🔑 **Ваши ключи:**"
+    text = "🔑 **Ваши ключи:**\n\nНажмите на ключ чтобы скопировать его и узнать более подробную информацию"
     if total_pages > 1:
         text += f"\n\n📄 Страница {page + 1} из {total_pages}"
 

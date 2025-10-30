@@ -242,6 +242,7 @@ async def get_all_active_keys_details():
                 Keys.c.expires_at,
                 Users.c.user_id,
                 Users.c.first_name,
+                Users.c.username,
                 Products.c.name.label("product_name"),
                 Products.c.duration_days
             )
