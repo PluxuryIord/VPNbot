@@ -79,7 +79,8 @@ async def cmd_start(message: Message):
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
         "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
-        reply_markup=get_main_menu_kb(user_id=message.from_user.id)
+        reply_markup=get_main_menu_kb(user_id=message.from_user.id),
+        parse_mode="Markdown"
     )
 
 
