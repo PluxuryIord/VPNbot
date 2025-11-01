@@ -268,3 +268,73 @@ async def get_all_active_keys_details():
 
         result = await session.execute(stmt)
         return result.fetchall()
+
+
+async def get_keys_for_renewal_warning(hours: int = 24):
+    """
+    Находит ПЛАТНЫЕ ключи, которые истекают через 23-24 часа,
+    И о которых ЕЩЕ НЕ ПРЕДУПРЕЖДАЛИ.
+    """
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+        in_X_minus_1_hours = now + datetime.timedelta(hours=hours - 1)
+        in_X_hours = now + datetime.timedelta(hours=hours)
+
+        stmt = (
+            select(Keys.c.user_id, Keys.c.id, Products.c.name)
+            .join(Orders, Keys.c.order_id == Orders.c.id)
+            .join(Products, Orders.c.product_id == Products.c.id)
+            .where(
+                (Keys.c.expires_at > in_X_minus_1_hours) &
+                (Keys.c.expires_at <= in_X_hours) &
+                (Keys.c.order_id.is_not(None)) &
+                (Keys.c.has_sent_renewal_warning == False)
+            )
+        )
+        result = await session.execute(stmt)
+        return result.fetchall()
+
+
+async def get_keys_for_expiry_notification():
+    """
+    Находит ВСЕ ключи (включая пробные), которые УЖЕ ИСТЕКЛИ,
+    И о которых ЕЩЕ НЕ УВЕДОМЛЯЛИ.
+    """
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+
+        stmt = (
+            select(Keys.c.user_id, Keys.c.id, Keys.c.order_id)
+            .where(
+                (Keys.c.expires_at <= now) &  #
+                (Keys.c.has_sent_expiry_notification == False)  #
+            )
+        )
+        result = await session.execute(stmt)
+        return result.fetchall()
+
+
+async def mark_renewal_warning_sent(key_id: int):
+    """Отмечает, что предупреждение за 24ч было отправлено."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = (
+                update(Keys)
+                .where(Keys.c.id == key_id)
+                .values(has_sent_renewal_warning=True)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+
+async def mark_expiry_notification_sent(key_id: int):
+    """Отмечает, что уведомление об истечении было отправлено."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = (
+                update(Keys)
+                .where(Keys.c.id == key_id)
+                .values(has_sent_expiry_notification=True)
+            )
+            await session.execute(stmt)
+            await session.commit()

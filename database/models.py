@@ -60,7 +60,9 @@ Keys = Table(
     Column('order_id', Integer, ForeignKey('orders.id'), nullable=True),
     Column('vless_key', String, unique=True, nullable=False),
     Column('created_at', DateTime, server_default=func.now()),
-    Column('expires_at', DateTime, nullable=False)
+    Column('expires_at', DateTime, nullable=False),
+    Column('has_sent_renewal_warning', Boolean, nullable=False, default=False, server_default='false'),
+    Column('has_sent_expiry_notification', Boolean, nullable=False, default=False, server_default='false')
 )
 
 # Таблица для админов

@@ -292,3 +292,14 @@ def get_broadcast_confirmation_kb() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def get_renewal_kb(key_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает кнопку "Продлить" для уведомлений об истечении.
+    Key_id: ID ключа (Keys.id), НЕ заказа.
+    Page: 0 (
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Продлить сейчас", callback_data=f"key_renew:{key_id}:0")]
+    ])

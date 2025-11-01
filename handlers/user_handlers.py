@@ -437,11 +437,11 @@ async def menu_key_copy(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("key_renew:"))
 async def menu_key_renew(callback: CallbackQuery, bot: Bot):
-    """Начинает процесс продления ключа."""
+    """Начинает процесс продления ключа. (Версия с фиксом пробных ключей)"""
     try:
         _, key_id_str, page_str = callback.data.split(":")
         key_id = int(key_id_str)
-        current_page = int(page_str)  # Запоминаем страницу для возврата
+        current_page = int(page_str)
     except (IndexError, ValueError):
         log.warning(f"Некорректный callback_data для продления ключа: {callback.data}")
         await callback.answer("Ошибка продления.", show_alert=True)
@@ -449,10 +449,13 @@ async def menu_key_renew(callback: CallbackQuery, bot: Bot):
 
     await callback.answer("⏳ Готовлю счет для продления...")
 
-    # 1. Получаем ключ и связанный заказ/продукт
     key = await db.get_key_by_id(key_id)
     if not key or key.user_id != callback.from_user.id:
         await callback.answer("Ключ не найден.", show_alert=True)
+        return
+
+    if key.order_id is None:
+        await callback.answer("Пробные ключи продлить нельзя. Пожалуйста, купите новый ключ.", show_alert=True)
         return
 
     original_order = await db.get_order_by_id(key.order_id)
@@ -467,8 +470,7 @@ async def menu_key_renew(callback: CallbackQuery, bot: Bot):
         await callback.answer("Ошибка: Не найден тариф для продления.", show_alert=True)
         return
 
-    # 2. Создаем НОВЫЙ заказ (для отслеживания платежа за продление)
-    # Используем цену и длительность оригинального продукта
+    # Создаем НОВЫЙ заказ для отслеживания платежа
     try:
         renewal_order_id = await db.create_order(
             user_id=callback.from_user.id,
@@ -480,33 +482,19 @@ async def menu_key_renew(callback: CallbackQuery, bot: Bot):
         await callback.answer("Не удалось создать заказ на продление.", show_alert=True)
         return
 
-    # 3. Создаем счет в ЮKassa, передаем ID ключа и ID нового заказа в metadata
-    payment_metadata = {
-        "renewal_key_id": str(key_id),  # ID ключа, который продлеваем
-        "renewal_order_id": str(renewal_order_id)  # ID нового заказа
-    }
-    payment_url, payment_id = await create_yookassa_payment(
-        amount=product.price,
-        description=f"Продление ключа '{product.name}' (Заказ #{renewal_order_id})",
-        order_id=renewal_order_id,  # Передаем ID НОВОГО заказа
-        metadata=payment_metadata
-    )
+    kb = get_payment_method_kb(renewal_order_id, product.country or "Unknown")
 
-    # 4. Обновляем НОВЫЙ заказ, добавляя payment_id
-    await db.update_order_status(renewal_order_id, payment_id, status='pending')
-
-    # 5. Отправляем ссылку на оплату
-    kb = get_payment_kb(payment_url, renewal_order_id)  # Используем ID НОВОГО заказа для кнопки "Проверить"
-    # Добавляем кнопку "Назад к деталям ключа"
     kb.inline_keyboard.append(
-        [InlineKeyboardButton(text="⬅️ Назад к деталям", callback_data=f"key_details:{key_id}:{current_page}")]
+        [InlineKeyboardButton(text="⬅️ Отмена (к деталям ключа)", callback_data=f"key_details:{key_id}:{current_page}")]
     )
+
+    await db.update_order_status(renewal_order_id, json.dumps({"renewal_key_id": key_id}), status='pending')
 
     await callback.message.edit_text(
         f"Вы продлеваете: **{product.name}**\n"
         f"Срок: +{product.duration_days} дней\n"
         f"Сумма к оплате: **{product.price} руб.**\n\n"
-        "Нажмите кнопку ниже, чтобы перейти к оплате:",
+        "Выберите способ оплаты:",
         reply_markup=kb,
         parse_mode="Markdown"
     )

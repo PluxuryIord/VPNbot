@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import scheduler_tasks
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -61,6 +62,8 @@ async def on_startup(bot: Bot):
                 log.info(f"В таблице Products уже есть {products_count} тарифов. Пропускаю добавление.")
             await session.commit()
     log.info("База данных инициализирована, админ и тарифы добавлены.")
+
+    asyncio.create_task(scheduler_tasks.check_expirations(bot))
 
 
 async def on_shutdown(bot: Bot):
