@@ -188,7 +188,8 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
         await callback.message.answer(
             success_text,
             parse_mode="Markdown",
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
+            reply_markup=get_back_to_instructions_kb()
         )
 
     # --- Если НЕ УДАЛОСЬ (уже получал или ошибка) ---
