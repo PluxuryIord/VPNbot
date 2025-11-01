@@ -189,7 +189,7 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             success_text,
             parse_mode="Markdown",
             disable_web_page_preview=True,
-            reply_markup=get_back_to_instructions_kb()
+            reply_markup=get_instruction_platforms_kb()
         )
 
     # --- Если НЕ УДАЛОСЬ (уже получал или ошибка) ---
