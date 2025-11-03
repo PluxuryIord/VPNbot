@@ -92,13 +92,13 @@ def generate_vless_key(user_uuid: str, product_name: str, user_id: int, server_c
 
 
 async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: int, country: str) -> tuple[
-    bool, str | None]:  # Добавили country
+    bool, uuid.UUID | None]:  #
     """
-    Полный цикл выдачи ключа: Выбор сервера ИЗ СТРАНЫ -> API -> Генерация -> БД
+    Полный цикл выдачи ключа.
+    Возвращает (Успех, Токен_Подписки).
     """
     try:
-        # 1. ВЫБИРАЕМ СЕРВЕР ИЗ УКАЗАННОЙ СТРАНЫ
-        server_config = await get_least_loaded_server(country=country)  # Передаем страну
+        server_config = await get_least_loaded_server(country=country)
         if not server_config:
             raise ValueError(f"No servers found for country: {country}")
 
@@ -109,7 +109,6 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
         new_uuid = str(uuid.uuid4())
         expires_at = datetime.datetime.now() + datetime.timedelta(days=product.duration_days)
 
-        # 2. ПЕРЕДАЕМ КОНФИГ ВЫБРАННОГО СЕРВЕРА в vpn_api
         api_success = await vpn_api.add_vless_user(
             server_config=server_config,
             user_id=user_id,
@@ -120,7 +119,6 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
         if not api_success:
             raise Exception("Failed to add user via X-UI API")
 
-        # 3. ГЕНЕРИРУЕМ КЛЮЧ (VLESS+Reality) для этого сервера
         vless_string = generate_vless_key(
             user_uuid=new_uuid,
             product_name=product.name,
@@ -128,8 +126,8 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
             server_config=server_config
         )
 
-        # 4. Сохраняем ключ в БД
-        await db.add_vless_key(
+        #
+        subscription_token = await db.add_vless_key(
             user_id=user_id,
             order_id=order_id,
             vless_key=vless_string,
@@ -137,7 +135,7 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
         )
 
         log.info(f"Successfully issued key {new_uuid} for order {order_id} on server {server_config.name}")
-        return True, vless_string
+        return True, subscription_token #
 
     except Exception as e:
         log.error(f"Failed to issue key for order {order_id} (user {user_id}): {e}")
@@ -146,7 +144,7 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
                 await bot.send_message(
                     admin_id,
                     f"⚠️ **СБОЙ ВЫДАЧИ КЛЮЧА** ⚠️\n\n"
-                    f"Не удалось выдать ключ для заказа #{order_id} (Пользователь: {user_id}, Страна: {country}).\n"  # Добавили страну в лог
+                    f"Не удалось выдать ключ для заказа #{order_id} (Пользователь: {user_id}, Страна: {country}).\n"
                     f"Ошибка: {e}\n\n"
                     "**Требуется ручное вмешательство!**",
                     parse_mode="Markdown"
@@ -159,70 +157,60 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
 
 async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
     """
-    Выдает ОДНОРАЗОВЫЙ пробный ключ на 24 часа.
-    1. Проверяет, не получал ли юзер триал.
-    2. Выбирает ПЕРВЫЙ финский сервер.
-    3. Добавляет юзера на VLess сервер (API) на 1 день.
-    4. Если успешно -> Сохраняет ключ в Keys и отмечает юзера в Users.
-    Возвращает (True/False, vless_string/None)
+    Выдает ОДНОРАЗОВЫЙ пробный ключ (Модель 2: ссылка-подписка).
+    Возвращает (True/False, subscription_url/error_message).
     """
     try:
-        # 1. Проверяем статус триала в БД
         has_trial = await db.check_trial_status(user_id)
         if has_trial:
             log.warning(f"Пользователь {user_id} уже получал пробный ключ.")
-            return False, "Вы уже активировали пробный период."  # Возвращаем False и сообщение
+            return False, "Вы уже активировали пробный период."
 
-        # 2. Находим ПЕРВЫЙ финский сервер в конфиге
         finland_servers = [s for s in settings.XUI_SERVERS if s.country == "Финляндия"]
         if not finland_servers:
             log.error("Не найдены серверы для Финляндии в конфиге для выдачи триала.")
             raise ValueError("Конфигурация для пробного периода не найдена.")
-        server_config = finland_servers[0]  # Берем первый финский
+        server_config = finland_servers[0]
 
-        # 3. Генерируем UUID и дату истечения (через 1 день)
         new_uuid = str(uuid.uuid4())
         expires_at = datetime.datetime.now() + datetime.timedelta(days=1)
         trial_duration_days = 1
 
-        # 4. ДОБАВЛЯЕМ ЮЗЕРА НА VPN-СЕРВЕР
-        log.info(f"Выдача пробного ключа для {user_id} на сервере {server_config.name}...")
         api_success = await vpn_api.add_vless_user(
             server_config=server_config,
             user_id=user_id,
-            days=trial_duration_days,  # Длительность 1 день
+            days=trial_duration_days,
             new_uuid=new_uuid
         )
 
         if not api_success:
             raise Exception("Failed to add trial user via X-UI API")
 
-        # 5. Генерируем VLESS-ссылку
         vless_string = generate_vless_key(
             user_uuid=new_uuid,
-            product_name="Пробный",  # Название для тега
+            product_name="Пробный",
             user_id=user_id,
             server_config=server_config
         )
 
-        # 6. Сохраняем ключ в НАШУ БД (без привязки к заказу - order_id = None или 0?)
-        # Давайте привяжем к несуществующему заказу 0, чтобы соответствовать схеме
-        await db.add_vless_key(
+        #
+        subscription_token = await db.add_vless_key(
             user_id=user_id,
-            order_id=None,  # Используем 0 для обозначения триального ключа
+            order_id=None, #
             vless_key=vless_string,
             expires_at=expires_at
         )
 
-        # 7. Отмечаем в БД, что юзер ПОЛУЧИЛ триал
         await db.mark_trial_received(user_id)
 
-        log.info(f"Пробный ключ {new_uuid} успешно выдан пользователю {user_id} на сервере {server_config.name}")
-        return True, vless_string  # Возвращаем успех и ключ
+        #
+        subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
+
+        log.info(f"Пробный ключ {new_uuid} успешно выдан (как подписка) пользователю {user_id} на сервере {server_config.name}")
+        return True, subscription_url #
 
     except Exception as e:
         log.error(f"Ошибка выдачи пробного ключа для {user_id}: {e}")
-        # Уведомляем админа
         try:
             for admin_id in settings.get_admin_ids:
                 await bot.send_message(
@@ -236,15 +224,13 @@ async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
         except Exception as admin_notify_e:
             log.error(f"Не удалось уведомить админа о сбое триала: {admin_notify_e}")
 
-        # Возвращаем False и общее сообщение об ошибке
         return False, "Не удалось выдать пробный ключ. Попробуйте позже или свяжитесь с поддержкой."
 
 
 async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple[bool, str]:
     """
     Универсальная логика обработки УСПЕШНОГО платежа (и ЮKassa, и Crypto).
-    Принимает order_id и dict с metadata.
-    Возвращает (Успех, Текст сообщения для пользователя).
+    (Модель 2: 1 ключ = 1 подписка)
     """
     try:
         order = await db.get_order_by_id(order_id)
@@ -256,7 +242,7 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
         user_id = order.user_id
         product_id = order.product_id
 
-        # --- ЛОГИКА ПРОДЛЕНИЯ ---
+        # --- ЛОГИКА ПРОДЛЕНИЯ (без изменений) ---
         if renewal_key_id_str:
             renewal_key_id = int(renewal_key_id_str)
             log.info(f"[PaymentLogic] Заказ {order_id} определен как ПРОДЛЕНИЕ ключа {renewal_key_id}.")
@@ -265,7 +251,6 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             product = await db.get_product_by_id(product_id)
 
             if not key_to_renew or not product or key_to_renew.user_id != user_id:
-                log.error(f"Ошибка продления: Ключ {renewal_key_id} или продукт {product_id} не найден/не принадлежит пользователю {user_id} для заказа {order_id}.")
                 raise ValueError("Ключ или продукт для продления не найден или не принадлежит вам.")
 
             now = datetime.datetime.now()
@@ -278,28 +263,28 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             message_text = (
                 f"✅ **Ключ успешно продлен!**\n\n"
                 f"Тариф: **{product.name}**\n"
-                f"Новый срок действия: до **{new_expiry_date.strftime('%Y-%m-%d %H:%M')}**"
+                f"Новый срок действия: до **{new_expiry_date.strftime('%Y-%m-%d %H:%M')}**\n\n"
+                "Ваш ключ автоматически обновился в приложении."
             )
             return True, message_text
 
-        # --- ЛОГИКА ВЫДАЧИ НОВОГО КЛЮЧА ---
         else:
             log.info(f"[PaymentLogic] Заказ {order_id} определен как НОВАЯ ПОКУПКА.")
             country = metadata.get("country")
-
             if not country:
                 log.error(f"!!! ОШИБКА: Не найдена страна в metadata для заказа {order_id}")
+                # ... (
                 product_for_country = await db.get_product_by_id(product_id)
                 if product_for_country and product_for_country.country:
                     country = product_for_country.country
                 else:
                     country = settings.XUI_SERVERS[0].country if settings.XUI_SERVERS else "Unknown"
-                log.warning(f"Страна '{country}' восстановлена по Product ID {product_id}")
-
                 if country == "Unknown":
                     return False, "Критическая ошибка: Не удалось определить страну сервера. Свяжитесь с поддержкой."
+                # ... )
 
-            success, vless_string = await issue_key_to_user(
+            #
+            success, subscription_token = await issue_key_to_user(
                 bot=bot,
                 user_id=user_id,
                 product_id=product_id,
@@ -309,13 +294,15 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
 
             if success:
                 product = await db.get_product_by_id(product_id)
-                expires_at = datetime.datetime.now() + datetime.timedelta(days=product.duration_days)
+                subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
+                #
                 message_text = (
-                    f"✅ **Оплата прошла успешно! ({country})**\n\n"
-                    "Ваш ключ доступа:\n"
-                    f"```\n{vless_string}\n```\n\n"
-                    f"Срок действия: **{product.duration_days} дней** (до {expires_at.strftime('%Y-%m-%d %H:%M')})\n\n"
-                    "Скопируйте ключ и добавьте его в V2Box."
+                    f"✅ **Оплата прошла успешно!**\n\n"
+                    f"Тариф: {product.name} ({country})\n"
+                    f"Срок: {product.duration_days} дней\n\n"
+                    "<b>Ваша новая ссылка на подписку:</b>\n"
+                    f"<code>{subscription_url}</code>\n\n"
+                    "Скопируйте ее и добавьте в V2Box (Import from URL)."
                 )
                 return True, message_text
             else:

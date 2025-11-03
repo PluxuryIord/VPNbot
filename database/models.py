@@ -1,7 +1,8 @@
 import datetime
+import uuid
 from sqlalchemy import (
     create_engine, MetaData, Table, Column, Integer, String, BigInteger,
-    DateTime, ForeignKey, Float, Enum, Boolean
+    DateTime, ForeignKey, Float, Enum, Boolean, UUID
 )
 
 from sqlalchemy.sql import func
@@ -23,7 +24,7 @@ Users = Table(
     Column('first_name', String(255)),
     Column('created_at', DateTime, server_default=func.now()),
     Column('has_received_trial', Boolean, nullable=False, default=False, server_default='false'),
-    Column('last_menu_id', BigInteger, nullable=True, default=None)
+    Column('last_menu_id', BigInteger, nullable=True, default=None),
 )
 
 # Таблица продуктов (тарифов)
@@ -62,7 +63,8 @@ Keys = Table(
     Column('created_at', DateTime, server_default=func.now()),
     Column('expires_at', DateTime, nullable=False),
     Column('has_sent_renewal_warning', Boolean, nullable=False, default=False, server_default='false'),
-    Column('has_sent_expiry_notification', Boolean, nullable=False, default=False, server_default='false')
+    Column('has_sent_expiry_notification', Boolean, nullable=False, default=False, server_default='false'),
+    Column('subscription_token', UUID(as_uuid=True), unique=True, server_default=func.gen_random_uuid())
 )
 
 # Таблица для админов

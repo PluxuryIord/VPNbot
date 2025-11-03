@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, insert, update, func
@@ -123,19 +125,24 @@ async def get_order_by_id(order_id: int):
         return result.fetchone()
 
 
-async def add_vless_key(user_id: int, order_id: int, vless_key: str, expires_at: datetime.datetime):
-    """Добавляет сгенерированный ключ в БД"""
+async def add_vless_key(user_id: int, order_id: int, vless_key: str, expires_at: datetime.datetime) -> uuid.UUID:
+    """
+    Добавляет сгенерированный ключ в БД и возвращает его токен подписки.
+    """
     async with AsyncSessionLocal() as session:
         async with session.begin():
+            new_token = uuid.uuid4()
             await session.execute(
                 insert(Keys).values(
                     user_id=user_id,
                     order_id=order_id,
                     vless_key=vless_key,
-                    expires_at=expires_at
+                    expires_at=expires_at,
+                    subscription_token=new_token #
                 )
             )
             await session.commit()
+            return new_token
 
 
 async def get_user_keys(user_id: int, page: int = 0, page_size: int = 5): # Добавили page, page_size
@@ -338,3 +345,20 @@ async def mark_expiry_notification_sent(key_id: int):
             )
             await session.execute(stmt)
             await session.commit()
+
+
+async def get_key_by_subscription_token(token: str):
+    """Находит ОДИН vless_key по токену подписки (из таблицы Keys)."""
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+        try:
+            #
+            stmt = select(Keys.c.vless_key).where(
+                (Keys.c.subscription_token == token) &
+                (Keys.c.expires_at > now) #
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() #
+        except Exception:
+            #
+            return None

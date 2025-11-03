@@ -1,11 +1,13 @@
 import logging
 import json
+import base64
 from aiohttp import web
 from aiogram import Bot
 from yookassa.domain.notification import WebhookNotification
 
 from database import db_commands as db
 from utils import handle_payment_logic
+from keyboards import get_renewal_kb, get_main_menu_kb, get_payment_success_kb
 
 log = logging.getLogger(__name__)
 
@@ -46,12 +48,15 @@ async def yookassa_webhook_handler(request: web.Request):
 
             metadata = payment.metadata
             success, message_text = await handle_payment_logic(bot, order_id, metadata)
+            renewal_key_id = metadata.get("renewal_key_id")
+            kb = get_payment_success_kb(renewal_key_id)
 
             await bot.send_message(
                 chat_id=order.user_id,
                 text=message_text,
                 parse_mode="Markdown",
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
+                reply_markup=kb
             )
             logging.info(f"Yookassa Webhook for order {order_id} completed. Success: {success}")
 
@@ -111,12 +116,15 @@ async def crypto_bot_webhook_handler(request: web.Request):
             logging.info(f"Order {order_id} marked as 'paid' by Crypto Bot webhook (Invoice: {invoice_id_str}).")
 
             success, message_text = await handle_payment_logic(bot, order_id, metadata)
+            renewal_key_id = metadata.get("renewal_key_id")
+            kb = get_payment_success_kb(renewal_key_id)
 
             await bot.send_message(
                 chat_id=order.user_id,
                 text=message_text,
                 parse_mode="Markdown",
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
+                reply_markup=kb
             )
             logging.info(f"Crypto Bot Webhook for order {order_id} completed. Success: {success}")
 
@@ -128,3 +136,32 @@ async def crypto_bot_webhook_handler(request: web.Request):
         return web.Response(status=200)
 
     return web.Response(status=200)
+
+
+async def subscription_handler(request: web.Request):
+    """
+    Обработчик для V2Ray-клиентов (ссылка на подписку).
+    (Модель 2: 1 токен = 1 ключ)
+    """
+    try:
+        token = request.match_info.get('token')
+        if not token:
+            return web.Response(status=404, text="Token not found")
+
+        #
+        active_key = await db.get_key_by_subscription_token(token)
+
+        if not active_key:
+            #
+            return web.Response(status=200, text="")
+
+            #
+        subscription_base64 = base64.b64encode(active_key.encode('utf-8')).decode('utf-8')
+
+        log.info(f"Subscription link for key (token {token[:4]}...) accessed.")
+
+        return web.Response(status=200, body=subscription_base64, content_type="text/plain")
+
+    except Exception as e:
+        log.error(f"Error in subscription_handler: {e}")
+        return web.Response(status=500, text="Internal server error")

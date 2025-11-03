@@ -100,14 +100,15 @@ def get_back_to_instructions_kb() -> InlineKeyboardMarkup:
     )
 
 
-def get_payment_kb(payment_url: str, order_id: int) -> InlineKeyboardMarkup:
+def get_payment_kb(payment_url: str, order_id: int, back_callback_data: str) -> InlineKeyboardMarkup:
     """
-    Клавиатура для ссылки на оплату (без кнопки "Отмена")
+    Клавиатура для ссылки на оплату (с кастомной кнопкой "Назад")
     """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
-            [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"check_payment:{order_id}")]
+            [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"check_payment:{order_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback_data)]
         ]
     )
 
@@ -212,10 +213,9 @@ def get_key_details_kb(key_id: int, current_page: int) -> InlineKeyboardMarkup:
     """Клавиатура для детального просмотра ключа."""
     keyboard = [
         [
-            InlineKeyboardButton(text="🔑 Скопировать ключ", callback_data=f"key_copy:{key_id}:{current_page}"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"mykeys_page:{current_page}"),
             InlineKeyboardButton(text="🔄 Продлить", callback_data=f"key_renew:{key_id}:{current_page}")
-        ],
-        [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"mykeys_page:{current_page}")]
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -303,3 +303,33 @@ def get_renewal_kb(key_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Продлить сейчас", callback_data=f"key_renew:{key_id}:0")]
     ])
+
+
+def get_renewal_payment_method_kb(order_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура выбора способа оплаты (ЮKassa / Crypto)
+    БЕЗ кнопки "Назад к тарифам" (для меню продления).
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Картой / ЮMoney / СБП", callback_data=f"pay_method:yookassa:{order_id}")],
+            [InlineKeyboardButton(text="💎 Криптовалютой (USDT)", callback_data=f"pay_method:crypto:{order_id}")]
+        ]
+    )
+
+
+def get_payment_success_kb(renewal_key_id: int | None = None) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для сообщения об успешной оплате (которое приходит от вебхука).
+    Включает кнопку "Главное меню" и, если это продление, "К деталям ключа".
+    """
+    keyboard = []
+
+    if renewal_key_id:
+        keyboard.append([
+            InlineKeyboardButton(text="⬅️ К деталям ключа", callback_data=f"key_details:{renewal_key_id}:0")
+        ])
+
+    keyboard.append([InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

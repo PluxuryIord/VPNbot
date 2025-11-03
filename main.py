@@ -104,6 +104,7 @@ async def main():
 
     app.router.add_post(YOOKASSA_WEBHOOK_PATH, webhook_handlers.yookassa_webhook_handler)
     app.router.add_post(settings.CRYPTO_BOT_WEBHOOK_PATH, webhook_handlers.crypto_bot_webhook_handler)
+    app.router.add_get("/sub/{token}", webhook_handlers.subscription_handler)
 
     # Связываем aiohttp приложение с диспетчером aiogram
     setup_application(app, dp, bot=bot)
