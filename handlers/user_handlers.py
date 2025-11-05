@@ -532,27 +532,45 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
     elif platform == "macos":
         text = TEXT_MACOS
 
-
     await callback.answer()
 
-    if not photo_id:
-        log.warning(f"Не найден file_id для инструкции '{platform}'. Отправляю текст.")
-        await callback.message.answer(
-            text,
-            # reply_markup
-            parse_mode="Markdown",
-            disable_web_page_preview=True
-        )
-        return
+    if not photo_data:
+        log.warning(f"Не найден file_id для инструкции '{platform}'.")
+        return  #
 
     try:
-        await bot.send_photo(
-            chat_id=callback.from_user.id,
-            photo=photo_id,
-            caption=text,
-            # reply_markup
-            parse_mode="Markdown"
-        )
+        # ⬇️ ⬇️ ⬇️ НОВАЯ ЛОГИКА ⬇️ ⬇️ ⬇️
+
+        #
+        if isinstance(photo_data, list):
+            #
+            media = []
+            for i, p_id in enumerate(photo_data):
+                if i == 0:
+                    #
+                    media.append(InputMediaPhoto(media=p_id, caption=text, parse_mode="Markdown"))
+                else:
+                    #
+                    media.append(InputMediaPhoto(media=p_id))
+
+            #
+            await bot.send_media_group(
+                chat_id=callback.from_user.id,
+                media=media
+            )
+
+        #
+        elif isinstance(photo_data, str):
+            #
+            await bot.send_photo(
+                chat_id=callback.from_user.id,
+                photo=photo_data,  #
+                caption=text,
+                parse_mode="Markdown"
+            )
+
+        #
+        await callback.message.delete()
 
     except AiogramError as e:
         log.error(f"Не удалось отправить фото-инструкцию для {platform} по file_id: {e}")
