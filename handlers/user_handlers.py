@@ -6,7 +6,7 @@ import crypto_pay
 import json
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from aiogram.filters import CommandStart
 from aiogram.exceptions import AiogramError
 from config import settings
@@ -521,7 +521,7 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
 
     platform = callback.data.split(":")[1]
     text = "Инструкция не найдена."
-    photo_id = photo_file_ids.get(platform)
+    photo_data = photo_file_ids.get(platform)
 
     if platform == "android":
         text = TEXT_ANDROID
