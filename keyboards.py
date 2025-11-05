@@ -333,3 +333,15 @@ def get_payment_success_kb(renewal_key_id: int | None = None) -> InlineKeyboardM
     keyboard.append([InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_trial_already_used_kb() -> InlineKeyboardMarkup:
+    """
+    Клавиатура для сообщения "Вы уже получали пробный ключ".
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
+        ]
+    )

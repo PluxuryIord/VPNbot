@@ -14,7 +14,7 @@ from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
     get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb, get_payment_method_kb, \
-    get_renewal_payment_method_kb, get_payment_success_kb
+    get_renewal_payment_method_kb, get_payment_success_kb, get_trial_already_used_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
@@ -27,9 +27,6 @@ router = Router()
 router.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
 
 router = Router()
-
-
-
 
 TEXT_INSTRUCTION_MENU = "ℹ️ **Инструкция**\n\nВыберите вашу операционную систему:"
 TEXT_ANDROID = """
@@ -45,6 +42,32 @@ TEXT_MACOS = """
 Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
 """
 TEXT_SUPPORT = "По всем вопросам пишите @NjordVPN_Support"
+
+
+async def _notify_admins(bot: Bot, text: str):
+    """Отправляет сообщение всем админам из .env."""
+    for admin_id in settings.get_admin_ids:
+        try:
+            await bot.send_message(
+                admin_id,
+                text,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except AiogramError as e:
+            log.warning(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+
+
+def _get_user_info_for_admin(message: Message | CallbackQuery) -> str:
+    """Форматирует кликабельную ссылку на пользователя или @username."""
+    user = message.from_user
+    if user.username:
+        #
+        return f"@{user.username}"
+    else:
+        #
+        safe_name = html.escape(user.first_name or f"User {user.id}")
+        return f'<a href="tg://user?id={user.id}">{safe_name}</a> (ID: {user.id})'
 
 
 def _get_flag_for_country(country_name: str) -> str:
@@ -91,6 +114,11 @@ async def cmd_start(message: Message, bot: Bot):  #
         username=message.from_user.username,
         first_name=message.from_user.full_name
     )
+
+    if last_menu_id is None:
+        user_info = _get_user_info_for_admin(message)
+        now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        await _notify_admins(bot, f"👤 Новый пользователь: {user_info}\n({now_str})")
 
     await _handle_old_menu(bot, message.from_user.id, last_menu_id)
 
@@ -145,9 +173,12 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
     log.info(f"Пользователь {user_id} запросил пробный период.")
     has_already_taken_trial = await db.check_trial_status(user_id)
     if has_already_taken_trial:
-        await callback.answer(
-            "Вы уже получали пробный ключ.",
-            show_alert=True
+        log.info(f"Пользователь {user_id} уже получал триал. Показываю меню 'Купить'.")
+        await callback.answer()
+        await callback.message.edit_text(
+            "Вы уже получали пробный ключ!\n\n"
+            "Ознакомьтесь с тарифами, если вам понравился пробный период:",
+            reply_markup=get_trial_already_used_kb()
         )
         return
 
@@ -157,8 +188,10 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
 
     if success:
         subscription_url = result_data  #
+        user_info = _get_user_info_for_admin(callback)
+        now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        await _notify_admins(bot, f"🎁 {user_info} получил пробный ключ.\n({now_str})")
 
-        #
         success_text = (
             f"✅ <b>Пробный период на 24 часа активирован!</b>\n"
             f"Ваш <b>ключ</b> 👇👇👇\n\n"
