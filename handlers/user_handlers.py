@@ -29,28 +29,11 @@ router.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
 router = Router()
 
 
-@router.message(F.photo)
-async def get_photo_file_id(message: Message):
-    """
-    Этот временный обработчик ловит любое фото
-    и присылает в ответ его file_id.
-    """
-    try:
-        #
-        photo_id = message.photo[-1].file_id
-        await message.answer(
-            f"<b>✅ FILE_ID получен:</b>\n\n"
-            f"<code>{photo_id}</code>",
-            parse_mode="HTML"
-        )
-        log.info(f"ПОЛУЧЕН FILE_ID: {photo_id}")
-    except Exception as e:
-        await message.answer(f"Ошибка получения file_id: {e}")
 
 
 TEXT_INSTRUCTION_MENU = "ℹ️ **Инструкция**\n\nВыберите вашу операционную систему:"
 TEXT_ANDROID = """
-Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
+Скачайте бесплатный клиент [v2RayTun](https://play.google.com/store/apps/details?id=com.v2raytun.android&pcampaignid=web_share) и вставьте ключ по инструкции с фото.
 """
 TEXT_IOS = """
 Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
@@ -510,7 +493,10 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
     """
 
     photo_file_ids = {
-        "android": "AgACAgIAAxkBAAIB... (",
+        "android": [
+            "AgACAgIAAxkBAAICPGkLY_drTd0nVnsL_5PKdBXaS9fQAAKKEGsb9sVZSBAqiewL-13xAQADAgADeQADNgQ",
+            "AgACAgIAAxkBAAICPmkLY_w-7WhQYf0AARMa3VunSj1lqAACixBrG_bFWUgDvT8Xod4Z3AEAAwIAA3kAAzYE"
+        ],
         "ios": "AgACAgIAAxkBAAICKGkLYm5_XyCAmvTiYB8jg6AGqUN9AAKAEGsb9sVZSEh7QgXeTYatAQADAgADeQADNgQ",
         "windows": [
             "AgACAgIAAxkBAAICIWkLWnL0GRAzIcCd4V-ECnF3-3O0AAJdD2sbVAJYSCHqt6zI0c4cAQADAgADeAADNgQ",
