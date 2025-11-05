@@ -7,7 +7,7 @@ from yookassa.domain.notification import WebhookNotification
 
 from database import db_commands as db
 from utils import handle_payment_logic
-from keyboards import get_renewal_kb, get_main_menu_kb, get_payment_success_kb
+from keyboards import get_renewal_kb, get_main_menu_kb, get_payment_success_kb, get_instruction_platforms_kb
 
 log = logging.getLogger(__name__)
 
@@ -47,14 +47,18 @@ async def yookassa_webhook_handler(request: web.Request):
             logging.info(f"Order {order_id} marked as 'paid' by Yookassa webhook.")
 
             metadata = payment.metadata
-            success, message_text = await handle_payment_logic(bot, order_id, metadata)
-            renewal_key_id = metadata.get("renewal_key_id")
-            kb = get_payment_success_kb(renewal_key_id)
+            success, message_text, operation_type = await handle_payment_logic(bot, order_id, metadata)
+            kb = None
+            if operation_type == "new_key":
+                kb = get_instruction_platforms_kb()  #
+            elif operation_type == "renewal":
+                renewal_key_id = metadata.get("renewal_key_id")
+                kb = get_payment_success_kb(renewal_key_id)  #
 
             await bot.send_message(
                 chat_id=order.user_id,
                 text=message_text,
-                parse_mode="Markdown",
+                parse_mode="HTML",  #
                 disable_web_page_preview=True,
                 reply_markup=kb
             )
@@ -115,14 +119,19 @@ async def crypto_bot_webhook_handler(request: web.Request):
             await db.update_order_status(order_id, invoice_id_str, status='paid')
             logging.info(f"Order {order_id} marked as 'paid' by Crypto Bot webhook (Invoice: {invoice_id_str}).")
 
-            success, message_text = await handle_payment_logic(bot, order_id, metadata)
-            renewal_key_id = metadata.get("renewal_key_id")
-            kb = get_payment_success_kb(renewal_key_id)
+            success, message_text, operation_type = await handle_payment_logic(bot, order_id, metadata)
+
+            kb = None
+            if operation_type == "new_key":
+                kb = get_instruction_platforms_kb()  #
+            elif operation_type == "renewal":
+                renewal_key_id = metadata.get("renewal_key_id")
+                kb = get_payment_success_kb(renewal_key_id)  #
 
             await bot.send_message(
                 chat_id=order.user_id,
                 text=message_text,
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 disable_web_page_preview=True,
                 reply_markup=kb
             )

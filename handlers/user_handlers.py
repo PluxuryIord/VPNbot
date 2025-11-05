@@ -13,7 +13,8 @@ from config import settings
 from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
-    get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb, get_payment_method_kb, get_renewal_payment_method_kb
+    get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb, get_payment_method_kb, \
+    get_renewal_payment_method_kb, get_payment_success_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
@@ -24,47 +25,41 @@ router = Router()
 
 # router.message.filter(CommandStart()).middleware(ThrottlingMiddleware(rate_limit=1.0))
 router.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
+
+router = Router()
+
+
+@router.message(F.photo)
+async def get_photo_file_id(message: Message):
+    """
+    Этот временный обработчик ловит любое фото
+    и присылает в ответ его file_id.
+    """
+    try:
+        #
+        photo_id = message.photo[-1].file_id
+        await message.answer(
+            f"<b>✅ FILE_ID получен:</b>\n\n"
+            f"<code>{photo_id}</code>",
+            parse_mode="HTML"
+        )
+        log.info(f"ПОЛУЧЕН FILE_ID: {photo_id}")
+    except Exception as e:
+        await message.answer(f"Ошибка получения file_id: {e}")
+
+
 TEXT_INSTRUCTION_MENU = "ℹ️ **Инструкция**\n\nВыберите вашу операционную систему:"
 TEXT_ANDROID = """
-📱 **Инструкция для Android (V2Box):**
-
-1. Скачайте приложение V2Box из [Google Play](https://play.google.com/store/apps/details?id=com.v2box.v2box).
-2. Скопируйте ключ VLESS, который выдал бот.
-3. Откройте V2Box и нажмите кнопку "+" внизу справа.
-4. Выберите "Import config from Clipboard".
-5. Нажмите на импортированный профиль для выбора.
-6. Нажмите большую круглую кнопку для подключения.
+Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
 """
 TEXT_IOS = """
-🍎 **Инструкция для iPhone/iPad (V2Box):**
-
-1. Скачайте приложение V2Box из [App Store](https://apps.apple.com/us/app/v2box-v2ray-client/id6446814670).
-2. Скопируйте ключ VLESS.
-3. Откройте V2Box -> вкладка "Configs".
-4. Нажмите "+" вверху справа.
-5. Выберите "Import from clipboard".
-6. Перейдите на вкладку "Home" -> "Connect".
+Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
 """
 TEXT_WINDOWS = """
-💻 **Инструкция для Windows (v2rayN):**
-
-1. Скачайте v2rayN-Core с [GitHub](https://github.com/2dust/v2rayN/releases). (Ищите `v2rayN-With-Core.zip`).
-2. Распакуйте архив, запустите `v2rayN.exe`.
-3. Скопируйте ключ VLESS.
-4. В v2rayN нажмите `Ctrl+V`.
-5. Ключ появится в списке. ПКМ -> "Установить как активный сервер".
-6. В трее (возле часов) иконка v2rayN -> ПКМ -> "Системный прокси" -> "Установить как системный прокси".
-7. Там же: "Режим маршрутизации" -> "Обход LAN и континентального Китая".
+Скачайте бесплатный клиент [v2RayN](https://github.com/2dust/v2rayN/releases) и вставьте ключ по инструкции с фото.
 """
 TEXT_MACOS = """
-🍏 **Инструкция для macOS (V2RayU):**
-
-1. Скачайте V2RayU с [GitHub](https://github.com/yanue/V2rayU/releases). (Ищите `.dmg`).
-2. Установите приложение.
-3. Скопируйте ключ VLESS.
-4. Иконка V2RayU в строке меню -> "Import" -> "Import from pasteboard".
-5. Выберите сервер в меню.
-6. Нажмите "Turn V2ray-core On".
+Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
 """
 TEXT_SUPPORT = "По всем вопросам пишите @NjordVPN_Support"
 
@@ -508,10 +503,23 @@ async def menu_instruction_platforms(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("instruction:"))
-async def menu_instruction_detail(callback: CallbackQuery):
-    """Показывает инструкцию для выбранной ОС."""
+async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
+    """
+    Показывает инструкцию для выбранной ОС.
+    (Версия 3.1: Отправляет Фото И УДАЛЯЕТ старое меню)
+    """
+
+    photo_file_ids = {
+        "android": "AgACAgIAAxkBAAIB... (",
+        "ios": "AgACAgIAAxkBAAICq2kLROhKfgWv-anm5RLrPQ6moeDeAAIkC2sbS6VJSF1oKppWVA0qAQADAgADeQADNgQ",
+        "windows": "AgACAgIAAxkBAAIB... (",
+        "macos": "AgACAgIAAxkBAAIB... ("
+    }
+
     platform = callback.data.split(":")[1]
     text = "Инструкция не найдена."
+    photo_id = photo_file_ids.get(platform)
+
     if platform == "android":
         text = TEXT_ANDROID
     elif platform == "ios":
@@ -521,12 +529,35 @@ async def menu_instruction_detail(callback: CallbackQuery):
     elif platform == "macos":
         text = TEXT_MACOS
 
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_back_to_instructions_kb(),  # Новая клавиатура
-        parse_mode="Markdown",
-        disable_web_page_preview=True
-    )
+
+    await callback.answer()
+
+    if not photo_id:
+        log.warning(f"Не найден file_id для инструкции '{platform}'. Отправляю текст.")
+        await callback.message.answer(
+            text,
+            # reply_markup
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
+        return
+
+    try:
+        await bot.send_photo(
+            chat_id=callback.from_user.id,
+            photo=photo_id,
+            caption=text,
+            # reply_markup
+            parse_mode="Markdown"
+        )
+
+    except AiogramError as e:
+        log.error(f"Не удалось отправить фото-инструкцию для {platform} по file_id: {e}")
+        await callback.message.answer(
+            f"Не удалось загрузить картинку, вот текстовая инструкция:\n\n{text}",
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
 
 
 @router.callback_query(F.data == "menu:support")
@@ -734,8 +765,21 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
             payment_info = await check_yookassa_payment(order.payment_id)
             if payment_info and payment_info.status == 'succeeded':
                 metadata = payment_info.metadata
-                success, message_text = await handle_payment_logic(bot, order_id, metadata)
-                await callback.message.edit_text(message_text, parse_mode="Markdown")
+                success, message_text, operation_type = await handle_payment_logic(bot, order_id, metadata)
+
+                kb = None
+                if operation_type == "new_key":
+                    kb = get_instruction_platforms_kb()  #
+                elif operation_type == "renewal":
+                    renewal_key_id = metadata.get("renewal_key_id")
+                    kb = get_payment_success_kb(renewal_key_id)  #
+
+                await callback.message.edit_text(
+                    message_text,
+                    reply_markup=kb,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
             else:
                 await callback.answer("Платеж в ЮKassa еще не прошел.", show_alert=True)
         else:

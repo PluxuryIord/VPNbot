@@ -227,22 +227,23 @@ async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
         return False, "Не удалось выдать пробный ключ. Попробуйте позже или свяжитесь с поддержкой."
 
 
-async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple[bool, str]:
+async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple[bool, str, str | None]:
     """
     Универсальная логика обработки УСПЕШНОГО платежа (и ЮKassa, и Crypto).
     (Модель 2: 1 ключ = 1 подписка)
+    Возвращает (Успех, Текст сообщения, Тип_Операции ["new_key" или "renewal"]).
     """
     try:
         order = await db.get_order_by_id(order_id)
         if not order:
             log.error(f"[PaymentLogic] Ошибка: Заказ {order_id} не найден.")
-            return False, "Ошибка: Заказ не найден."
+            return False, "Ошибка: Заказ не найден.", None
 
         renewal_key_id_str = metadata.get("renewal_key_id")
         user_id = order.user_id
         product_id = order.product_id
 
-        # --- ЛОГИКА ПРОДЛЕНИЯ (без изменений) ---
+        # --- ЛОГИКА ПРОДЛЕНИЯ ---
         if renewal_key_id_str:
             renewal_key_id = int(renewal_key_id_str)
             log.info(f"[PaymentLogic] Заказ {order_id} определен как ПРОДЛЕНИЕ ключа {renewal_key_id}.")
@@ -260,30 +261,30 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             await db.update_key_expiry(renewal_key_id, new_expiry_date)
             log.info(f"Ключ {renewal_key_id} продлен до {new_expiry_date}.")
 
+            #
             message_text = (
-                f"✅ **Ключ успешно продлен!**\n\n"
-                f"Тариф: **{product.name}**\n"
-                f"Новый срок действия: до **{new_expiry_date.strftime('%Y-%m-%d %H:%M')}**\n\n"
-                "Ваш ключ автоматически обновился в приложении."
+                f"✅ <b>Ключ успешно продлен!</b>\n\n"
+                f"Тариф: <b>{product.name}</b>\n"
+                f"Новый срок действия: до <code>{new_expiry_date.strftime('%Y-%m-%d %H:%M')}</code>\n\n"
+                "Ваш ключ остался прежним, обновите его в приложении."
             )
-            return True, message_text
+            return True, message_text, "renewal"  #
 
+        # --- ⬇️ ⬇️ ⬇️ ИЗМЕНЕНИЕ (ЗАПРОС 1) ⬇️ ⬇️ ⬇️ ---
+        # --- ЛОГИКА ВЫДАЧИ НОВОГО КЛЮЧА ---
         else:
             log.info(f"[PaymentLogic] Заказ {order_id} определен как НОВАЯ ПОКУПКА.")
             country = metadata.get("country")
             if not country:
                 log.error(f"!!! ОШИБКА: Не найдена страна в metadata для заказа {order_id}")
-                # ... (
                 product_for_country = await db.get_product_by_id(product_id)
                 if product_for_country and product_for_country.country:
                     country = product_for_country.country
                 else:
                     country = settings.XUI_SERVERS[0].country if settings.XUI_SERVERS else "Unknown"
                 if country == "Unknown":
-                    return False, "Критическая ошибка: Не удалось определить страну сервера. Свяжитесь с поддержкой."
-                # ... )
+                    return False, "Критическая ошибка: Не удалось определить страну сервера. Свяжитесь с поддержкой.", None
 
-            #
             success, subscription_token = await issue_key_to_user(
                 bot=bot,
                 user_id=user_id,
@@ -295,24 +296,25 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             if success:
                 product = await db.get_product_by_id(product_id)
                 subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
+
                 #
                 message_text = (
-                    f"✅ **Оплата прошла успешно!**\n\n"
-                    f"Тариф: {product.name} ({country})\n"
-                    f"Срок: {product.duration_days} дней\n\n"
-                    "<b>Ваша новая ссылка на подписку:</b>\n"
+                    f"✅ <b>Оплата прошла успешно!</b>\n\n"
+                    f"Ваш ключ 👇👇👇\n\n"
                     f"<code>{subscription_url}</code>\n\n"
-                    "Скопируйте ее и добавьте в V2Box (Import from URL)."
+                    f"1. Нажмите на ключ 👆👆👆, чтобы скопировать его\n"
+                    f"2. Выберите тип устройства"
                 )
-                return True, message_text
+                return True, message_text, "new_key"  #
             else:
                 message_text = (
                     "❌ **Ошибка выдачи ключа**\n\n"
                     "Оплата прошла, но при создании ключа произошла ошибка.\n"
                     "Мы уже уведомили администратора. Пожалуйста, свяжитесь с поддержкой."
                 )
-                return False, message_text
+                return False, message_text, None
+        # --- ⬆️ ⬆️ ⬆️ КОНЕЦ ИЗМЕНЕНИЯ ⬆️ ⬆️ ⬆️
 
     except Exception as e:
         log.error(f"Критическая ошибка в handle_payment_logic для заказа {order_id}: {e}")
-        return False, "❌ **Критическая ошибка**\n\nПроизошла непредвиденная ошибка при обработке вашего платежа. Свяжитесь с поддержкой."
+        return False, "❌ **Критическая ошибка**\n\nПроизошла непредвиденная ошибка при обработке вашего платежа. Свяжитесь с поддержкой.", None
