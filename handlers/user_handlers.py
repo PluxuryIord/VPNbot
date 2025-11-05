@@ -511,7 +511,7 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
 
     photo_file_ids = {
         "android": "AgACAgIAAxkBAAIB... (",
-        "ios": "AgACAgIAAxkBAAICq2kLROhKfgWv-anm5RLrPQ6moeDeAAIkC2sbS6VJSF1oKppWVA0qAQADAgADeQADNgQ",
+        "ios": "AgACAgIAAxkBAAICKGkLYm5_XyCAmvTiYB8jg6AGqUN9AAKAEGsb9sVZSEh7QgXeTYatAQADAgADeQADNgQ",
         "windows": [
             "AgACAgIAAxkBAAICIWkLWnL0GRAzIcCd4V-ECnF3-3O0AAJdD2sbVAJYSCHqt6zI0c4cAQADAgADeAADNgQ",
             "AgACAgIAAxkBAAICH2kLWmRvaP2PDReDiJAJA73uclRaAAJcD2sbVAJYSBnNd5oZOSROAQADAgADeAADNgQ"
