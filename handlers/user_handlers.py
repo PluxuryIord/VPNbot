@@ -570,7 +570,7 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
             )
 
         #
-        await callback.message.delete()
+        # await callback.message.delete()
 
     except AiogramError as e:
         log.error(f"Не удалось отправить фото-инструкцию для {platform} по file_id: {e}")
