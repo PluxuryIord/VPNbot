@@ -77,4 +77,4 @@ async def check_expirations(bot: Bot):
         except Exception as e:
             log.error(f"Error in expiration checker task: {e}")
 
-        await asyncio.sleep(10)  # Проверка каждые 10 минут
+        await asyncio.sleep(600)  # Проверка каждые 10 минут
