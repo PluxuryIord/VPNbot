@@ -39,14 +39,14 @@ async def get_or_create_user(user_id: int, username: str, first_name: str) -> in
                         username=username,
                         first_name=first_name,
                         has_received_trial=False,
-                        last_menu_id=None #
+                        last_menu_id=None  #
                     )
                 )
                 await session.commit()
-                return None #
+                return None  #
             else:
                 #
-                return user.last_menu_id #
+                return user.last_menu_id  #
 
 
 async def update_user_menu_id(user_id: int, message_id: int):
@@ -73,7 +73,7 @@ async def get_products(country: str | None = None):
             stmt = stmt.where((Products.c.country == country) | (Products.c.country == None))
         else:
             # Если страна не указана, показываем все (или только общие? Решай сам)
-            pass # Показываем все
+            pass  # Показываем все
         result = await session.execute(stmt)
         return result.fetchall()
 
@@ -138,14 +138,14 @@ async def add_vless_key(user_id: int, order_id: int, vless_key: str, expires_at:
                     order_id=order_id,
                     vless_key=vless_key,
                     expires_at=expires_at,
-                    subscription_token=new_token #
+                    subscription_token=new_token  #
                 )
             )
             await session.commit()
             return new_token
 
 
-async def get_user_keys(user_id: int, page: int = 0, page_size: int = 5): # Добавили page, page_size
+async def get_user_keys(user_id: int, page: int = 0, page_size: int = 5):  # Добавили page, page_size
     """Получает ключи пользователя для указанной страницы."""
     async with AsyncSessionLocal() as session:
         offset = page * page_size
@@ -169,7 +169,6 @@ async def count_user_keys(user_id: int) -> int:
         return count if count is not None else 0
 
 
-
 async def get_key_by_id(key_id: int):
     """Получает один ключ по его ID."""
     async with AsyncSessionLocal() as session:
@@ -189,6 +188,7 @@ async def update_key_expiry(key_id: int, new_expires_at: datetime.datetime):
             )
             await session.execute(stmt)
             await session.commit()
+
 
 async def get_user_key_by_order_id(order_id: int):
     """Получает ключ по ID заказа"""
@@ -321,6 +321,61 @@ async def get_keys_for_expiry_notification():
         return result.fetchall()
 
 
+async def get_keys_for_renewal_warning(hours: int = 24):
+    """Находит ПЛАТНЫЕ ключи, которые истекают через указанное время."""
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+        in_X_hours = now + datetime.timedelta(hours=hours)
+        # Берем диапазон, чтобы не спамить, если бот лежал
+        in_X_minus_some_hours = now + datetime.timedelta(hours=max(1, hours - 2))
+
+        stmt = (
+            select(Keys.c.user_id, Keys.c.id, Products.c.name)
+            .join(Orders, Keys.c.order_id == Orders.c.id)
+            .join(Products, Orders.c.product_id == Products.c.id)
+            .where(
+                (Keys.c.expires_at > in_X_minus_some_hours) &
+                (Keys.c.expires_at <= in_X_hours) &
+                (Keys.c.order_id.is_not(None)) &
+                (Keys.c.has_sent_renewal_warning == False)
+            )
+        )
+        result = await session.execute(stmt)
+        return result.fetchall()
+
+
+async def get_trial_keys_for_warning(hours: int = 2):
+    """Находит ПРОБНЫЕ ключи, истекающие скоро (для Task 4)."""
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+        in_X_hours = now + datetime.timedelta(hours=hours)
+
+        stmt = (
+            select(Keys.c.user_id, Keys.c.id)
+            .where(
+                (Keys.c.expires_at > now) &
+                (Keys.c.expires_at <= in_X_hours) &
+                (Keys.c.order_id.is_(None)) &  # Только пробные
+                (Keys.c.has_sent_trial_warning == False)
+            )
+        )
+        result = await session.execute(stmt)
+        return result.fetchall()
+
+
+async def mark_trial_warning_sent(key_id: int):
+    """Отмечает, что предупреждение о триале отправлено."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = (
+                update(Keys)
+                .where(Keys.c.id == key_id)
+                .values(has_sent_trial_warning=True)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+
 async def mark_renewal_warning_sent(key_id: int):
     """Отмечает, что предупреждение за 24ч было отправлено."""
     async with AsyncSessionLocal() as session:
@@ -355,10 +410,10 @@ async def get_key_by_subscription_token(token: str):
             #
             stmt = select(Keys.c.vless_key).where(
                 (Keys.c.subscription_token == token) &
-                (Keys.c.expires_at > now) #
+                (Keys.c.expires_at > now)  #
             )
             result = await session.execute(stmt)
-            return result.scalar_one_or_none() #
+            return result.scalar_one_or_none()  #
         except Exception:
             #
             return None

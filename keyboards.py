@@ -19,25 +19,23 @@ def _get_flag_for_country(country_name: str) -> str:
     return "🏳️"  # Флаг по умолчанию
 
 
-def get_main_menu_kb(user_id: int) -> InlineKeyboardMarkup:
-    """
-    Генерирует главное меню.
-    Для админов добавляет кнопку "Админ-панель".
-    """
+def get_main_menu_kb(user_id: int, has_keys: bool = False) -> InlineKeyboardMarkup:
+    """Главное меню. Кнопка 'Мои ключи' показывается только если has_keys=True."""
     keyboard = [
         [InlineKeyboardButton(text="🎁 Пробный период (24ч)", callback_data="trial:get")],
         [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:buy")],
-        [InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")],
-        [
-            InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
-            InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
-        ],
     ]
 
+    if has_keys:
+         keyboard.append([InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
+
+    keyboard.append([
+        InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
+        InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
+    ])
+
     if user_id in settings.get_admin_ids:
-        keyboard.insert(1, [
-            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin:main")
-        ])
+        keyboard.insert(1, [InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin:main")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -68,6 +66,13 @@ def get_country_selection_kb() -> InlineKeyboardMarkup:
 
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_trial_discount_kb(key_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для спецпредложения за 2 часа до конца триала."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔥 Продлить за 119₽", callback_data=f"special_offer:119:{key_id}")]
+    ])
 
 
 def get_instruction_platforms_kb() -> InlineKeyboardMarkup:

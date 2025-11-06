@@ -100,15 +100,12 @@ async def _handle_old_menu(bot: Bot, user_id: int, last_menu_id: int | None):
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, bot: Bot):  #
-    """Обработчик /start (Версия с удалением старого меню)"""
-
+async def cmd_start(message: Message, bot: Bot):
     try:
         await message.delete()
-    except AiogramError as e:
-        log.info(f"Не удалось удалить /start сообщение {message.message_id} от {message.from_user.id}: {e}")
+    except AiogramError:
+        pass
 
-    # 1.
     last_menu_id = await db.get_or_create_user(
         user_id=message.from_user.id,
         username=message.from_user.username,
@@ -122,43 +119,56 @@ async def cmd_start(message: Message, bot: Bot):  #
 
     await _handle_old_menu(bot, message.from_user.id, last_menu_id)
 
+    # TASK 1: Проверяем наличие ключей
+    keys_count = await db.count_user_keys(message.from_user.id)
+    show_keys = keys_count > 0
+
     new_menu_message = await message.answer(
         f"👋 Привет, {message.from_user.full_name}!\n\n"
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
         "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
-        reply_markup=get_main_menu_kb(user_id=message.from_user.id),
+        reply_markup=get_main_menu_kb(user_id=message.from_user.id, has_keys=show_keys),
         parse_mode="Markdown",
         disable_web_page_preview=True
     )
     await db.update_user_menu_id(message.from_user.id, new_menu_message.message_id)
 
 
-# === Инлайн-навигация ===
-
 @router.callback_query(F.data == "menu:main")
 async def menu_main(callback: CallbackQuery):
-    """Главное меню (инлайн)."""
+    # TASK 1: Проверяем наличие ключей при возврате в меню
+    keys_count = await db.count_user_keys(callback.from_user.id)
+    show_keys = keys_count > 0
+
     await callback.message.edit_text(
         f"👋 Привет, {callback.from_user.full_name}!\n\n"
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
         "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
-        reply_markup=get_main_menu_kb(user_id=callback.from_user.id),
+        reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys),
         parse_mode="Markdown"
     )
 
 
 @router.callback_query(F.data == "menu:buy")
 async def menu_buy_select_country(callback: CallbackQuery):
-    """Показывает выбор страны."""
+    # TASK 2: Новый текст меню покупки
+    text = (
+        "Мы используем только высокопроизводительные серверы:\n\n"
+        "⚡ **Премиум (Финляндия)**\n"
+        "Канал 10 Гбит/с. Оптимизирован для стриминга (Netflix, 4K) и игр с низким пингом.\n\n"
+        "🔹 **Стандарт (Германия, Нидерланды)**\n"
+        "Канал 1 Гбит/с. Идеально подходит для мессенджеров и соцсетей.\n\n"
+        "Все тарифы включают безлимитный трафик.\n\n"
+        "🌍 Выберите страну подключения:"
+    )
     await callback.message.edit_text(
-        "🌍 Выберите страну подключения:\n"
-        "⚡ Премиум локации с повышенной скоростью\n"
-        "🔹 Стандартные локации",
-        reply_markup=get_country_selection_kb()  # Новая клавиатура
+        text,
+        reply_markup=get_country_selection_kb(),
+        parse_mode="Markdown"
     )
     await callback.answer()
 
@@ -217,6 +227,32 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             await callback.answer()
         else:
             await callback.answer(error_message, show_alert=True)
+
+
+
+@router.callback_query(F.data.startswith("special_offer:"))
+async def process_special_offer(callback: CallbackQuery):
+    try:
+        _, price_str, key_id_str = callback.data.split(":")
+        price, key_id = float(price_str), int(key_id_str)
+    except ValueError:
+        await callback.answer("Ошибка предложения.", show_alert=True)
+        return
+    await callback.answer("⏳ Создаю заказ по акции...")
+
+    finland_products = await db.get_products(country="Финляндия")
+    product = next((p for p in finland_products if p.duration_days == 30), finland_products[0] if finland_products else None)
+    if not product:
+        await callback.answer("Ошибка: Тариф не найден.", show_alert=True)
+        return
+
+    order_id = await db.create_order(user_id=callback.from_user.id, product_id=product.id, amount=price)
+    # ВАЖНО: Сохраняем тип "special_offer" и цену для кнопки "Назад"
+    await db.update_order_status(order_id, json.dumps({"renewal_key_id": key_id, "type": "special_offer", "offer_price": price}), status='pending')
+
+    kb = get_renewal_payment_method_kb(order_id)
+    # kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"key_details:{key_id}:0")])
+    await callback.message.edit_text(f"🔥 **Специальное предложение!**\n\nТариф: **{product.name} (Финляндия 🇫🇮)**\nСрок: **30 дней**\nСумма к оплате: **{price:.0f} руб.**\n\nВыберите способ оплаты:", reply_markup=kb, parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("select_country:"))
@@ -397,99 +433,43 @@ async def menu_key_details(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("key_renew:"))
-async def menu_key_renew(callback: CallbackQuery, bot: Bot):
-    """Начинает процесс продления ключа. (Версия 4: Стандартная цена триала + фикс кнопок)"""
+async def menu_key_renew(callback: CallbackQuery):
     try:
         _, key_id_str, page_str = callback.data.split(":")
-        key_id = int(key_id_str)
-        current_page = int(page_str)
+        key_id, current_page = int(key_id_str), int(page_str)
     except (IndexError, ValueError):
-        log.warning(f"Некорректный callback_data для продления ключа: {callback.data}")
         await callback.answer("Ошибка продления.", show_alert=True)
         return
-
     await callback.answer("⏳ Готовлю счет для продления...")
-
     key = await db.get_key_by_id(key_id)
     if not key or key.user_id != callback.from_user.id:
         await callback.answer("Ключ не найден.", show_alert=True)
         return
 
-    renewal_product = None
-    renewal_price = 0.0
-    renewal_country = "Unknown"
-
-    # ⬇️ ⬇️ ⬇️ ИЗМЕНЕНИЕ (ЗАПРОС 3) ⬇️ ⬇️ ⬇️
-    # ===
     if key.order_id is None:
-        log.info(f"Пользователь {callback.from_user.id} продлевает ТРИАЛ (Ключ ID: {key.id})")
         finland_products = await db.get_products(country="Финляндия")
-        if not finland_products:
-            await callback.answer("Ошибка: Тарифы для Финляндии (триал) не найдены.", show_alert=True)
-            return
-
-        try:
-            #
-            renewal_product = next(p for p in finland_products if p.duration_days == 30)
-        except StopIteration:
-            #
-            renewal_product = sorted(finland_products, key=lambda p: p.price)[0]
-
-        renewal_country = "Финляндия"
-        renewal_price = renewal_product.price  # ⬅️ УБРАНА СКИДКА, берем стандартную цену
-        log.info(f"Продление триала по стандартной цене {renewal_price} RUB (продукт {renewal_product.id}).")
-
-
-    else:
-        log.info(f"Пользователь {callback.from_user.id} продлевает ОБЫЧНЫЙ ключ (Ключ ID: {key.id})")
-        original_order = await db.get_order_by_id(key.order_id)
-        if not original_order:
-            log.error(f"Не найден оригинальный заказ {key.order_id} для ключа {key.id}")
-            await callback.answer("Ошибка: Не найден оригинальный заказ.", show_alert=True)
-            return
-
-        renewal_product = await db.get_product_by_id(original_order.product_id)
+        renewal_product = next((p for p in finland_products if p.duration_days == 30), finland_products[0] if finland_products else None)
         if not renewal_product:
-            log.error(f"Не найден продукт {original_order.product_id} для заказа {key.order_id}")
+             await callback.answer("Ошибка: Тарифы для Финляндии не найдены.", show_alert=True)
+             return
+        renewal_price = renewal_product.price
+        renewal_text = f"Вы продлеваете пробный ключ (Финляндия 🇫🇮):\nТариф: **{renewal_product.name}**\n"
+    else:
+        original_order = await db.get_order_by_id(key.order_id)
+        renewal_product = await db.get_product_by_id(original_order.product_id) if original_order else None
+        if not renewal_product:
             await callback.answer("Ошибка: Не найден тариф для продления.", show_alert=True)
             return
-
         renewal_price = renewal_product.price
-        renewal_country = renewal_product.country or "Unknown"
+        renewal_text = f"Вы продлеваете: **{renewal_product.name}**\n"
 
-    try:
-        renewal_order_id = await db.create_order(
-            user_id=callback.from_user.id,
-            product_id=renewal_product.id,
-            amount=renewal_price
-        )
-    except Exception as e:
-        log.error(f"Ошибка создания заказа на продление для ключа {key_id}: {e}")
-        await callback.answer("Не удалось создать заказ на продление.", show_alert=True)
-        return
+    renewal_order_id = await db.create_order(user_id=callback.from_user.id, product_id=renewal_product.id, amount=renewal_price)
+    # ВАЖНО: Сохраняем тип "renewal" для кнопки "Назад"
+    await db.update_order_status(renewal_order_id, json.dumps({"renewal_key_id": key_id, "type": "renewal"}), status='pending')
 
     kb = get_renewal_payment_method_kb(renewal_order_id)
-
-    kb.inline_keyboard.append(
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_details:{key_id}:{current_page}")]
-    )
-
-    await db.update_order_status(renewal_order_id, json.dumps({"renewal_key_id": key_id}), status='pending')
-
-    #
-    renewal_text = f"Вы продлеваете: **{renewal_product.name}**\n"
-    if key.order_id is None:
-        renewal_text = f"Вы продлеваете пробный ключ (Финляндия 🇫🇮):\n"
-        renewal_text += f"Тариф: **{renewal_product.name}**\n"  #
-
-    await callback.message.edit_text(
-        f"{renewal_text}"
-        f"Срок: +{renewal_product.duration_days} дней\n"
-        f"Сумма к оплате: **{renewal_price} руб.**\n\n"
-        "Выберите способ оплаты:",
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_details:{key_id}:{current_page}")])
+    await callback.message.edit_text(f"{renewal_text}Срок: +{renewal_product.duration_days} дней\nСумма к оплате: **{renewal_price} руб.**\n\nВыберите способ оплаты:", reply_markup=kb, parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "menu:help")
@@ -671,115 +651,64 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data.startswith("pay_method:"))
 async def process_payment_method(callback: CallbackQuery, bot: Bot):
-    """
-    Обработка нажатия на кнопку способа оплаты (ЮKassa или Crypto).
-    Шаг 2: Создает ссылку на оплату и отправляет ее НОВЫМ сообщением.
-    (Версия с фиксом "Назад" и "Продления")
-    """
     await callback.answer("⏳ Создаю ссылку на оплату...")
-
     try:
         _, method, order_id_str = callback.data.split(":")
         order_id = int(order_id_str)
     except ValueError:
-        log.error(f"Invalid pay_method callback data: {callback.data}")
-        await callback.answer("Ошибка! Не удалось обработать способ оплаты.", show_alert=True)
+        await callback.answer("Ошибка!", show_alert=True)
         return
 
     order = await db.get_order_by_id(order_id)
-    if not order or order.user_id != callback.from_user.id:
-        await callback.answer("Заказ не найден!", show_alert=True)
+    if not order or order.user_id != callback.from_user.id or order.status != 'pending':
+        await callback.answer("Заказ не найден или уже обработан.", show_alert=True)
         return
-
-    if order.status != 'pending':
-        await callback.answer("Платеж по этому заказу уже создан или обработан.", show_alert=True)
-        return
-
     product = await db.get_product_by_id(order.product_id)
     if not product:
-        await callback.answer("Ошибка: Тариф не найден для этого заказа.", show_alert=True)
+        await callback.answer("Тариф не найден.", show_alert=True)
         return
 
-    # ⬇️ ⬇️ ⬇️ ИСПРАВЛЕНИЕ ОШИБКИ 1 и 2 ⬇️ ⬇️ ⬇️
     renewal_key_id = None
-    back_callback_data = f"select_country:{product.country or 'Unknown'}"  #
+    back_callback_data = f"select_country:{product.country or 'Unknown'}"
 
-    #
+    # === ВАЖНО: Определяем, куда возвращаться по кнопке "Назад" ===
     if order.payment_id and order.payment_id.startswith("{"):
         try:
-            #
             order_metadata = json.loads(order.payment_id)
             renewal_key_id = order_metadata.get("renewal_key_id")
-            if renewal_key_id:
-                log.info(f"Это заказ ({order_id}) на продление ключа {renewal_key_id}.")
-                #
-                #
-                back_callback_data = f"key_details:{renewal_key_id}:0"  #
+            order_type = order_metadata.get("type")
+            if order_type == "special_offer":
+                 # Возвращаемся на экран спецпредложения
+                 offer_price = order_metadata.get("offer_price", 119)
+                 back_callback_data = f"special_offer:{offer_price}:{renewal_key_id}"
+            elif order_type == "renewal":
+                 # Возвращаемся на экран обычного продления
+                 back_callback_data = f"key_renew:{renewal_key_id}:0"
+        except (json.JSONDecodeError, AttributeError): pass
 
-        except (json.JSONDecodeError, AttributeError):
-            pass  #
-
-    #
-    metadata = {
-        "order_id": str(order_id),
-        "country": product.country or "Unknown",
-        "renewal_key_id": renewal_key_id  #
-    }
-    # ⬆️ ⬆️ ⬆️ КОНЕЦ ИСПРАВЛЕНИЯ ⬆️ ⬆️ ⬆️
-
-    payment_url = None
-    payment_id_to_db = None
-    payment_system_name = ""
+    metadata = {"order_id": str(order_id), "country": product.country or "Unknown", "renewal_key_id": renewal_key_id}
+    amount_to_pay = order.amount
+    payment_url, payment_id_to_db, payment_system_name = None, None, ""
 
     try:
         if method == "yookassa":
             payment_system_name = "ЮKassa"
-            payment_url, payment_id = await create_yookassa_payment(
-                amount=product.price,
-                description=f"Оплата '{product.name}' ({metadata['country']}) (Заказ #{order_id})",
-                order_id=order_id,
-                metadata=metadata  #
-            )
-            payment_id_to_db = payment_id
-
+            payment_url, payment_id_to_db = await create_yookassa_payment(amount=amount_to_pay, description=f"Оплата '{product.name}' ({metadata['country']}) (Заказ #{order_id})", order_id=order_id, metadata=metadata)
         elif method == "crypto":
             payment_system_name = "Crypto Bot"
-            payment_url = await crypto_pay.create_crypto_invoice(
-                amount_rub=product.price,
-                currency="RUB",
-                order_id=order_id,
-                metadata=metadata  #
-            )
+            payment_url = await crypto_pay.create_crypto_invoice(amount_rub=amount_to_pay, currency="RUB", order_id=order_id, metadata=metadata)
             payment_id_to_db = f"crypto_{order_id}"
-
-        if not payment_url:
-            raise Exception(f"Не удалось сгенерировать ссылку на оплату для {payment_system_name}")
-
+        if not payment_url: raise Exception("Empty payment URL")
     except Exception as e:
-        log.error(f"Ошибка создания счета {payment_system_name} для заказа {order_id}: {e}")
-        await callback.answer(f"Не удалось создать счет в {payment_system_name}. Попробуйте другой способ.",
-                              show_alert=True)
+        log.error(f"Ошибка создания счета {method}: {e}")
+        await callback.answer("Не удалось создать счет. Попробуйте другой способ.", show_alert=True)
         return
 
-    #
-    #
     await db.update_order_status(order_id, payment_id_to_db, status='pending')
-
-    #
-    kb = get_payment_kb(payment_url, order_id, back_callback_data)
-
     try:
-        await callback.message.answer(
-            f"Ваша ссылка на оплату ({payment_system_name}):\n"
-            f"Тариф: **{product.name} ({metadata['country']})**\n"
-            f"Сумма: **{product.price} руб.**\n\n"
-            "Нажмите кнопку ниже, чтобы перейти к оплате:",
-            reply_markup=kb,
-            parse_mode="Markdown"
-        )
+        await callback.message.answer(f"Ваша ссылка на оплату ({payment_system_name}):\nТариф: **{product.name} ({metadata['country']})**\nСумма: **{amount_to_pay:.0f} руб.**\n\nНажмите кнопку ниже, чтобы перейти к оплате:", reply_markup=get_payment_kb(payment_url, order_id, back_callback_data), parse_mode="Markdown")
         await callback.message.delete()
-    except Exception as e:
-        log.error(f"Ошибка при отправке/удалении сообщения об оплате: {e}")
+    except Exception: pass
 
 
 @router.callback_query(F.data.startswith("check_payment:"))
