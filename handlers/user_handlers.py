@@ -154,8 +154,7 @@ async def cmd_start(message: Message, bot: Bot):
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
-        "P.S. Если есть любые вопросы (даже до пробы) — смело жми 💬 Поддержка, я на связи.\n\n"
-        "P.P.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
+        "Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
     )
 
     # ЗАДАЧА 1: Отправляем фото
@@ -179,8 +178,7 @@ async def menu_main(callback: CallbackQuery):
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
-        "P.S. Если есть любые вопросы (даже до пробы) — смело жми 💬 Поддержка, я на связи.\n\n"
-        "P.P.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
+        "Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
     )
 
     # ЗАДАЧА 1: Редактируем медиа (фото)
@@ -215,7 +213,7 @@ async def menu_buy_select_country(callback: CallbackQuery):
         "Все тарифы включают безлимитный трафик.\n\n"
         "🌍 Выберите страну подключения:"
     )
-    await callback.message.edit_text(
+    await callback.message.edit_caption(
         text,
         reply_markup=get_country_selection_kb(),
         parse_mode="Markdown"
@@ -355,7 +353,7 @@ async def menu_keys_show_first_page(callback: CallbackQuery):
 
     total_keys = await db.count_user_keys(user_id)
     if total_keys == 0:
-        await callback.message.edit_text(
+        await callback.message.edit_caption(
             "У вас пока нет купленных ключей.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]]
@@ -551,7 +549,7 @@ async def menu_static(callback: CallbackQuery):
 @router.callback_query(F.data == "menu:instruction")
 async def menu_instruction_platforms(callback: CallbackQuery):
     """Показывает выбор ОС для инструкции."""
-    await callback.message.edit_text(
+    await callback.message.edit_caption(
         TEXT_INSTRUCTION_MENU,
         reply_markup=get_instruction_platforms_kb(),
         parse_mode="Markdown"
