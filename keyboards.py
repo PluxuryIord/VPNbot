@@ -350,3 +350,13 @@ def get_trial_already_used_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
         ]
     )
+
+
+
+def get_take_trial_reminder_kb() -> InlineKeyboardMarkup:
+    """
+    Клавиатура для напоминания (спустя 24ч) о том, что можно взять триал.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎁 Попробовать бесплатно (24ч)", callback_data="trial:get")]
+    ])

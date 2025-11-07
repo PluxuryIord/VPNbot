@@ -28,6 +28,8 @@ router.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
 
 router = Router()
 
+MAIN_MENU_PHOTO_ID = "AgACAgIAAxkBAAIJEGkOhERO-jqywbMpUzH_gyKfYn2EAALUEGsb9b5wSICwqZ7eVYNoAQADAgADeQADNgQ"
+
 TEXT_INSTRUCTION_MENU = "ℹ️ **Инструкция**\n\nВыберите вашу операционную систему:"
 TEXT_ANDROID = """
 Скачайте бесплатный клиент [v2RayTun](https://play.google.com/store/apps/details?id=com.v2raytun.android&pcampaignid=web_share) и вставьте ключ по инструкции с фото.
@@ -41,26 +43,26 @@ TEXT_WINDOWS = """
 TEXT_MACOS = """
 Скачайте бесплатный клиент [v2RayTun](https://apps.apple.com/ru/app/v2raytun/id6476628951) и вставьте ключ по инструкции с фото.
 """
-TEXT_SUPPORT = "По всем вопросам пишите @NjordVPN_Support"
+TEXT_SUPPORT = "По всем вопросам пишите @NjordVPN_Support. Поможем разобраться свыбором, настройкой или оплатой."
 
 
-@router.message(F.photo)
-async def get_photo_file_id(message: Message):
-    """
-    Этот временный обработчик ловит любое фото
-    и присылает в ответ его file_id.
-    """
-    try:
-        #
-        photo_id = message.photo[-1].file_id
-        await message.answer(
-            f"<b>✅ FILE_ID получен:</b>\n\n"
-            f"<code>{photo_id}</code>",
-            parse_mode="HTML"
-        )
-        log.info(f"ПОЛУЧЕН FILE_ID: {photo_id}")
-    except Exception as e:
-        await message.answer(f"Ошибка получения file_id: {e}")
+# @router.message(F.photo)
+# async def get_photo_file_id(message: Message):
+#     """
+#     Этот временный обработчик ловит любое фото
+#     и присылает в ответ его file_id.
+#     """
+#     try:
+#         #
+#         photo_id = message.photo[-1].file_id
+#         await message.answer(
+#             f"<b>✅ FILE_ID получен:</b>\n\n"
+#             f"<code>{photo_id}</code>",
+#             parse_mode="HTML"
+#         )
+#         log.info(f"ПОЛУЧЕН FILE_ID: {photo_id}")
+#     except Exception as e:
+#         await message.answer(f"Ошибка получения file_id: {e}")
 
 
 async def _notify_admins(bot: Bot, text: str):
@@ -110,10 +112,15 @@ async def _handle_old_menu(bot: Bot, user_id: int, last_menu_id: int | None):
     except AiogramError as e:
         if "message to delete not found" in str(e) or "message can't be deleted" in str(e):
             try:
-                await bot.edit_message_text("🗑️", chat_id=user_id, message_id=last_menu_id)
-            except Exception as e_edit:
-                log.info(
-                    f"Не удалось ни удалить, ни отредактировать старое меню {last_menu_id} для {user_id}: {e_edit}")
+                # Пытаемся отредактировать в "невидимое" (если это было фото, не выйдет)
+                await bot.edit_message_caption(chat_id=user_id, message_id=last_menu_id, caption=" ")
+            except Exception:
+                try:
+                    # Если не вышло с caption, пробуем text (старая версия)
+                    await bot.edit_message_text("🗑️", chat_id=user_id, message_id=last_menu_id)
+                except Exception as e_edit:
+                    log.info(
+                        f"Не удалось ни удалить, ни отредактировать старое меню {last_menu_id} для {user_id}: {e_edit}")
         else:
             log.info(f"Не удалось удалить старое меню {last_menu_id} для {user_id}: {e}")
 
@@ -138,38 +145,62 @@ async def cmd_start(message: Message, bot: Bot):
 
     await _handle_old_menu(bot, message.from_user.id, last_menu_id)
 
-    # TASK 1: Проверяем наличие ключей
     keys_count = await db.count_user_keys(message.from_user.id)
     show_keys = keys_count > 0
 
-    new_menu_message = await message.answer(
+    # ЗАДАЧА 3: Обновлен текст
+    caption_text = (
         f"👋 Привет, {message.from_user.full_name}!\n\n"
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
-        "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
+        "P.S. Если есть любые вопросы (даже до пробы) — смело жми 💬 Поддержка, я на связи.\n\n"
+        "P.P.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
+    )
+
+    # ЗАДАЧА 1: Отправляем фото
+    new_menu_message = await message.answer_photo(
+        photo=MAIN_MENU_PHOTO_ID,
+        caption=caption_text,
         reply_markup=get_main_menu_kb(user_id=message.from_user.id, has_keys=show_keys),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        parse_mode="Markdown"
     )
     await db.update_user_menu_id(message.from_user.id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data == "menu:main")
 async def menu_main(callback: CallbackQuery):
-    # TASK 1: Проверяем наличие ключей при возврате в меню
     keys_count = await db.count_user_keys(callback.from_user.id)
     show_keys = keys_count > 0
 
-    await callback.message.edit_text(
+    # ЗАДАЧА 3: Обновлен текст
+    caption_text = (
         f"👋 Привет, {callback.from_user.full_name}!\n\n"
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
-        "\nP.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN",
-        reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys),
-        parse_mode="Markdown"
+        "P.S. Если есть любые вопросы (даже до пробы) — смело жми 💬 Поддержка, я на связи.\n\n"
+        "P.P.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
     )
+
+    # ЗАДАЧА 1: Редактируем медиа (фото)
+    try:
+        await callback.message.edit_media(
+            media=InputMediaPhoto(media=MAIN_MENU_PHOTO_ID, caption=caption_text, parse_mode="Markdown"),
+            reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys)
+        )
+    except AiogramError as e:
+        if "message is not modified" in str(e).lower():
+            await callback.answer()  # Игнорируем, если не изменилось
+        else:
+            await callback.message.delete()
+            new_menu_message = await callback.message.answer_photo(
+                photo=MAIN_MENU_PHOTO_ID,
+                caption=caption_text,
+                reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys),
+                parse_mode="Markdown"
+            )
+            await db.update_user_menu_id(callback.from_user.id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data == "menu:buy")
@@ -248,7 +279,6 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             await callback.answer(error_message, show_alert=True)
 
 
-
 @router.callback_query(F.data.startswith("special_offer:"))
 async def process_special_offer(callback: CallbackQuery):
     try:
@@ -260,18 +290,23 @@ async def process_special_offer(callback: CallbackQuery):
     await callback.answer("⏳ Создаю заказ по акции...")
 
     finland_products = await db.get_products(country="Финляндия")
-    product = next((p for p in finland_products if p.duration_days == 30), finland_products[0] if finland_products else None)
+    product = next((p for p in finland_products if p.duration_days == 30),
+                   finland_products[0] if finland_products else None)
     if not product:
         await callback.answer("Ошибка: Тариф не найден.", show_alert=True)
         return
 
     order_id = await db.create_order(user_id=callback.from_user.id, product_id=product.id, amount=price)
     # ВАЖНО: Сохраняем тип "special_offer" и цену для кнопки "Назад"
-    await db.update_order_status(order_id, json.dumps({"renewal_key_id": key_id, "type": "special_offer", "offer_price": price}), status='pending')
+    await db.update_order_status(order_id,
+                                 json.dumps({"renewal_key_id": key_id, "type": "special_offer", "offer_price": price}),
+                                 status='pending')
 
     kb = get_renewal_payment_method_kb(order_id)
     # kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"key_details:{key_id}:0")])
-    await callback.message.edit_text(f"🔥 **Специальное предложение!**\n\nТариф: **{product.name} (Финляндия 🇫🇮)**\nСрок: **30 дней**\nСумма к оплате: **{price:.0f} руб.**\n\nВыберите способ оплаты:", reply_markup=kb, parse_mode="Markdown")
+    await callback.message.edit_text(
+        f"🔥 **Специальное предложение!**\n\nТариф: **{product.name} (Финляндия 🇫🇮)**\nСрок: **30 дней**\nСумма к оплате: **{price:.0f} руб.**\n\nВыберите способ оплаты:",
+        reply_markup=kb, parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("select_country:"))
@@ -467,10 +502,11 @@ async def menu_key_renew(callback: CallbackQuery):
 
     if key.order_id is None:
         finland_products = await db.get_products(country="Финляндия")
-        renewal_product = next((p for p in finland_products if p.duration_days == 30), finland_products[0] if finland_products else None)
+        renewal_product = next((p for p in finland_products if p.duration_days == 30),
+                               finland_products[0] if finland_products else None)
         if not renewal_product:
-             await callback.answer("Ошибка: Тарифы для Финляндии не найдены.", show_alert=True)
-             return
+            await callback.answer("Ошибка: Тарифы для Финляндии не найдены.", show_alert=True)
+            return
         renewal_price = renewal_product.price
         renewal_text = f"Вы продлеваете пробный ключ (Финляндия 🇫🇮):\nТариф: **{renewal_product.name}**\n"
     else:
@@ -482,13 +518,18 @@ async def menu_key_renew(callback: CallbackQuery):
         renewal_price = renewal_product.price
         renewal_text = f"Вы продлеваете: **{renewal_product.name}**\n"
 
-    renewal_order_id = await db.create_order(user_id=callback.from_user.id, product_id=renewal_product.id, amount=renewal_price)
+    renewal_order_id = await db.create_order(user_id=callback.from_user.id, product_id=renewal_product.id,
+                                             amount=renewal_price)
     # ВАЖНО: Сохраняем тип "renewal" для кнопки "Назад"
-    await db.update_order_status(renewal_order_id, json.dumps({"renewal_key_id": key_id, "type": "renewal"}), status='pending')
+    await db.update_order_status(renewal_order_id, json.dumps({"renewal_key_id": key_id, "type": "renewal"}),
+                                 status='pending')
 
     kb = get_renewal_payment_method_kb(renewal_order_id)
-    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_details:{key_id}:{current_page}")])
-    await callback.message.edit_text(f"{renewal_text}Срок: +{renewal_product.duration_days} дней\nСумма к оплате: **{renewal_price} руб.**\n\nВыберите способ оплаты:", reply_markup=kb, parse_mode="Markdown")
+    kb.inline_keyboard.append(
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_details:{key_id}:{current_page}")])
+    await callback.message.edit_text(
+        f"{renewal_text}Срок: +{renewal_product.duration_days} дней\nСумма к оплате: **{renewal_price} руб.**\n\nВыберите способ оплаты:",
+        reply_markup=kb, parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "menu:help")
@@ -602,26 +643,27 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
 @router.callback_query(F.data == "menu:support")
 async def menu_support(callback: CallbackQuery):
     """Показывает контакт поддержки и ссылку на оферту."""
-    log.info("Вошли в обработчик menu_support")  # <-- Лог 1
+    log.info("Вошли в обработчик menu_support")
     try:
         kb = get_support_kb()
-        kb_json = kb.model_dump_json(indent=2)  # Преобразуем в JSON для лога
-        log.info(f"Сгенерирована клавиатура:\n{kb_json}")  # <-- Лог 2
+        kb_json = kb.model_dump_json(indent=2)
+        log.info(f"Сгенерирована клавиатура:\n{kb_json}")
 
-        await callback.message.edit_text(
-            TEXT_SUPPORT,
+        # ЗАДАЧА 3: Используем TEXT_SUPPORT
+        await callback.message.edit_caption(
+            caption=TEXT_SUPPORT,
             reply_markup=kb
         )
-        log.info("Вызов edit_text успешно завершен.")  # <-- Лог 3
+
+        log.info("Вызов edit_caption успешно завершен.")
         await callback.answer()
-        log.info("Вызов callback.answer() успешно завершен.")  # <-- Лог 4
+        log.info("Вызов callback.answer() успешно завершен.")
     except AiogramError as e:
-        # Ловим общие ошибки aiogram
-        log.error(f"AiogramError в menu_support: {e}")
-        await callback.answer("Произошла ошибка при обновлении меню.", show_alert=True)
+        if "message is not modified" not in str(e).lower():
+            log.error(f"AiogramError в menu_support: {e}")
+            await callback.answer("Произошла ошибка при обновлении меню.", show_alert=True)
     except Exception as e:
-        # Ловим любые другие ошибки
-        log.exception("Непредвиденная ошибка в menu_support:")  # Используем exception для полного трейсбека
+        log.exception("Непредвиденная ошибка в menu_support:")
         await callback.answer("Произошла критическая ошибка.", show_alert=True)
 
 
@@ -697,13 +739,14 @@ async def process_payment_method(callback: CallbackQuery, bot: Bot):
             renewal_key_id = order_metadata.get("renewal_key_id")
             order_type = order_metadata.get("type")
             if order_type == "special_offer":
-                 # Возвращаемся на экран спецпредложения
-                 offer_price = order_metadata.get("offer_price", 119)
-                 back_callback_data = f"special_offer:{offer_price}:{renewal_key_id}"
+                # Возвращаемся на экран спецпредложения
+                offer_price = order_metadata.get("offer_price", 119)
+                back_callback_data = f"special_offer:{offer_price}:{renewal_key_id}"
             elif order_type == "renewal":
-                 # Возвращаемся на экран обычного продления
-                 back_callback_data = f"key_renew:{renewal_key_id}:0"
-        except (json.JSONDecodeError, AttributeError): pass
+                # Возвращаемся на экран обычного продления
+                back_callback_data = f"key_renew:{renewal_key_id}:0"
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
     metadata = {"order_id": str(order_id), "country": product.country or "Unknown", "renewal_key_id": renewal_key_id}
     amount_to_pay = order.amount
@@ -712,10 +755,13 @@ async def process_payment_method(callback: CallbackQuery, bot: Bot):
     try:
         if method == "yookassa":
             payment_system_name = "ЮKassa"
-            payment_url, payment_id_to_db = await create_yookassa_payment(amount=amount_to_pay, description=f"Оплата '{product.name}' ({metadata['country']}) (Заказ #{order_id})", order_id=order_id, metadata=metadata)
+            payment_url, payment_id_to_db = await create_yookassa_payment(amount=amount_to_pay,
+                                                                          description=f"Оплата '{product.name}' ({metadata['country']}) (Заказ #{order_id})",
+                                                                          order_id=order_id, metadata=metadata)
         elif method == "crypto":
             payment_system_name = "Crypto Bot"
-            payment_url = await crypto_pay.create_crypto_invoice(amount_rub=amount_to_pay, currency="RUB", order_id=order_id, metadata=metadata)
+            payment_url = await crypto_pay.create_crypto_invoice(amount_rub=amount_to_pay, currency="RUB",
+                                                                 order_id=order_id, metadata=metadata)
             payment_id_to_db = f"crypto_{order_id}"
         if not payment_url: raise Exception("Empty payment URL")
     except Exception as e:
@@ -725,9 +771,12 @@ async def process_payment_method(callback: CallbackQuery, bot: Bot):
 
     await db.update_order_status(order_id, payment_id_to_db, status='pending')
     try:
-        await callback.message.answer(f"Ваша ссылка на оплату ({payment_system_name}):\nТариф: **{product.name} ({metadata['country']})**\nСумма: **{amount_to_pay:.0f} руб.**\n\nНажмите кнопку ниже, чтобы перейти к оплате:", reply_markup=get_payment_kb(payment_url, order_id, back_callback_data), parse_mode="Markdown")
+        await callback.message.answer(
+            f"Ваша ссылка на оплату ({payment_system_name}):\nТариф: **{product.name} ({metadata['country']})**\nСумма: **{amount_to_pay:.0f} руб.**\n\nНажмите кнопку ниже, чтобы перейти к оплате:",
+            reply_markup=get_payment_kb(payment_url, order_id, back_callback_data), parse_mode="Markdown")
         await callback.message.delete()
-    except Exception: pass
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("check_payment:"))

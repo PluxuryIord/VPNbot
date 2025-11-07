@@ -25,6 +25,7 @@ Users = Table(
     Column('created_at', DateTime, server_default=func.now()),
     Column('has_received_trial', Boolean, nullable=False, default=False, server_default='false'),
     Column('last_menu_id', BigInteger, nullable=True, default=None),
+    Column('has_sent_trial_reminder', Boolean, nullable=False, default=False, server_default='false'),
 )
 
 # Таблица продуктов (тарифов)

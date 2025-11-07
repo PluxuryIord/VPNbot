@@ -4,7 +4,7 @@ import datetime
 
 from aiogram import Bot
 from database import db_commands as db
-from keyboards import get_renewal_kb, get_trial_discount_kb
+from keyboards import get_renewal_kb, get_trial_discount_kb, get_take_trial_reminder_kb
 from config import settings
 
 log = logging.getLogger(__name__)
@@ -73,6 +73,25 @@ async def check_expirations(bot: Bot):
                     await db.mark_expiry_notification_sent(key.id)
                 except Exception as e:
                     log.warning(f"Failed to send expiry notification to {key.user_id}: {e}")
+
+            # === 4. ЗАДАЧА 2: НАПОМИНАНИЕ О ТРИАЛЕ (КТО НЕ ВЗЯЛ) ===
+            users_to_remind = await db.get_users_for_trial_reminder(hours_min=24, hours_max=25)
+            for user_id in users_to_remind:
+                try:
+                    await bot.send_message(
+                        user_id,
+                        "👋 Привет!\n\n"
+                        "Вы были в боте 24 часа назад, но так и не попробовали наш VPN.\n\n"
+                        "Не упускайте шанс оценить премиум-скорость (Финляндия 🇫🇮) бесплатно!",
+                        reply_markup=get_take_trial_reminder_kb(),
+                        parse_mode="Markdown"
+                    )
+                    await db.mark_trial_reminder_sent(user_id)
+                except Exception as e:
+                    log.warning(f"Failed to send trial reminder to {user_id}: {e}")
+                    # Если юзер заблочил бота, тоже ставим метку, чтоб не пытаться снова
+                    if "bot was blocked" in str(e).lower():
+                        await db.mark_trial_reminder_sent(user_id)
 
         except Exception as e:
             log.error(f"Error in expiration checker task: {e}")

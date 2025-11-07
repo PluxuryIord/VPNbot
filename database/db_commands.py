@@ -417,3 +417,41 @@ async def get_key_by_subscription_token(token: str):
         except Exception:
             #
             return None
+
+
+
+async def get_users_for_trial_reminder(hours_min: int = 24, hours_max: int = 25):
+    """
+    Находит пользователей, которые зарегистрировались X часов назад,
+    не брали триал и не получали напоминание.
+    """
+    async with AsyncSessionLocal() as session:
+        now = datetime.datetime.now()
+        # Ищем тех, кто зарегистрировался 24-25 часов назад
+        min_time_ago = now - datetime.timedelta(hours=hours_max)
+        max_time_ago = now - datetime.timedelta(hours=hours_min)
+
+        stmt = (
+            select(Users.c.user_id)
+            .where(
+                (Users.c.created_at > min_time_ago) &
+                (Users.c.created_at <= max_time_ago) &
+                (Users.c.has_received_trial == False) &
+                (Users.c.has_sent_trial_reminder == False)
+            )
+        )
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+
+async def mark_trial_reminder_sent(user_id: int):
+    """Отмечает, что напоминание о триале было отправлено."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = (
+                update(Users)
+                .where(Users.c.user_id == user_id)
+                .values(has_sent_trial_reminder=True)
+            )
+            await session.execute(stmt)
+            await session.commit()
