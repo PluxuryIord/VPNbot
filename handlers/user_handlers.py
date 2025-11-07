@@ -44,6 +44,25 @@ TEXT_MACOS = """
 TEXT_SUPPORT = "По всем вопросам пишите @NjordVPN_Support"
 
 
+@router.message(F.photo)
+async def get_photo_file_id(message: Message):
+    """
+    Этот временный обработчик ловит любое фото
+    и присылает в ответ его file_id.
+    """
+    try:
+        #
+        photo_id = message.photo[-1].file_id
+        await message.answer(
+            f"<b>✅ FILE_ID получен:</b>\n\n"
+            f"<code>{photo_id}</code>",
+            parse_mode="HTML"
+        )
+        log.info(f"ПОЛУЧЕН FILE_ID: {photo_id}")
+    except Exception as e:
+        await message.answer(f"Ошибка получения file_id: {e}")
+
+
 async def _notify_admins(bot: Bot, text: str):
     """Отправляет сообщение всем админам из .env."""
     for admin_id in settings.get_admin_ids:
