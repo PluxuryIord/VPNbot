@@ -168,78 +168,95 @@ async def cmd_start(message: Message, bot: Bot):
 
 
 @router.callback_query(F.data == "menu:main")
-async def menu_main(callback: CallbackQuery):
+async def menu_main(callback: CallbackQuery, bot: Bot):
     keys_count = await db.count_user_keys(callback.from_user.id)
     show_keys = keys_count > 0
 
-    # ЗАДАЧА 3: Обновлен текст
     caption_text = (
         f"👋 Привет, {callback.from_user.full_name}!\n\n"
         "Я бот NjordVPN. Ищешь быстрый и стабильный VPN?\n\n"
         "Не нужно покупать вслепую. **Попробуй наш VPN бесплатно!**\n\n"
         "Нажми 🎁 **Пробный период (24ч)** в меню ниже, чтобы мгновенно получить свой первый ключ.\n\n"
-        "Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
+        "P.S. Если есть любые вопросы (даже до пробы) — смело жми 💬 Поддержка, я на связи.\n\n"
+        "P.P.S. Наш основной канал с новостями и акциями: https://t.me/NjordVPN"
     )
 
-    # ЗАДАЧА 1: Редактируем медиа (фото)
     try:
-        await callback.message.edit_media(
-            media=InputMediaPhoto(media=MAIN_MENU_PHOTO_ID, caption=caption_text, parse_mode="Markdown"),
-            reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys)
-        )
+        # 1. Удаляем старое меню (текст ИЛИ фото)
+        await callback.message.delete()
     except AiogramError as e:
-        if "message is not modified" in str(e).lower():
-            await callback.answer()  # Игнорируем, если не изменилось
-        else:
-            await callback.message.delete()
-            new_menu_message = await callback.message.answer_photo(
-                photo=MAIN_MENU_PHOTO_ID,
-                caption=caption_text,
-                reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys),
-                parse_mode="Markdown"
-            )
-            await db.update_user_menu_id(callback.from_user.id, new_menu_message.message_id)
+        log.info(f"Не удалось удалить сообщение при возврате в menu:main: {e}")
+
+    # 2. Шлем новое фото-меню
+    new_menu_message = await callback.message.answer_photo(
+        photo=MAIN_MENU_PHOTO_ID,
+        caption=caption_text,
+        reply_markup=get_main_menu_kb(user_id=callback.from_user.id, has_keys=show_keys),
+        parse_mode="Markdown"
+    )
+    # 3. Сохраняем ID нового меню
+    await db.update_user_menu_id(callback.from_user.id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data == "menu:buy")
-async def menu_buy_select_country(callback: CallbackQuery):
-    # TASK 2: Новый текст меню покупки
+async def menu_buy_select_country(callback: CallbackQuery, bot: Bot):
     text = (
         "Мы используем только высокопроизводительные серверы:\n\n"
         "⚡ **Премиум (Финляндия)**\n"
         "Канал 10 Гбит/с. Оптимизирован для стриминга (Netflix, 4K) и игр с низким пингом.\n\n"
         "🔹 **Стандарт (Германия, Нидерланды)**\n"
-        "Канал 1 Гбит/с. Идеально подходит для мессенджеров и соцсетей.\n\n"
+        "Канал 1 Гбит/с. Идеально подходит для браузинга, мессенджеров и соцсетей.\n\n"
         "Все тарифы включают безлимитный трафик.\n\n"
         "🌍 Выберите страну подключения:"
     )
-    await callback.message.edit_caption(
+
+    await callback.answer()
+    try:
+        # 1. Удаляем фото-меню
+        await callback.message.delete()
+    except AiogramError as e:
+        log.info(f"Не удалось удалить сообщение в menu:buy: {e}")
+
+    # 2. Шлем новое текстовое меню
+    new_menu_message = await callback.message.answer(
         text,
         reply_markup=get_country_selection_kb(),
         parse_mode="Markdown"
     )
-    await callback.answer()
+    # 3. Сохраняем ID нового меню
+    await db.update_user_menu_id(callback.from_user.id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data == "trial:get")
 async def process_trial_get(callback: CallbackQuery, bot: Bot):
     """
     Обрабатывает нажатие на кнопку 'Пробный период'.
-    (Модель 2: Выдает 1 ссылку-подписку на 1 ключ)
     """
     user_id = callback.from_user.id
     log.info(f"Пользователь {user_id} запросил пробный период.")
     has_already_taken_trial = await db.check_trial_status(user_id)
+
     if has_already_taken_trial:
         log.info(f"Пользователь {user_id} уже получал триал. Показываю меню 'Купить'.")
         await callback.answer()
-        await callback.message.edit_text(
+
+        try:
+            # 1. Удаляем фото-меню
+            await callback.message.delete()
+        except AiogramError as e:
+            log.info(f"Не удалось удалить сообщение в process_trial_get (уже брал): {e}")
+
+        # 2. Шлем новое текстовое меню
+        new_menu_message = await callback.message.answer(
             "Вы уже получали пробный ключ!\n\n"
             "Ознакомьтесь с тарифами, если вам понравился пробный период:",
             reply_markup=get_trial_already_used_kb()
         )
+        # 3. Сохраняем ID нового меню
+        await db.update_user_menu_id(user_id, new_menu_message.message_id)
         return
 
+    # --- Если триал ЕЩЕ НЕ БРАЛ ---
     await callback.answer("⏳ Проверяю возможность выдачи...")
 
     success, result_data = await issue_trial_key(bot, user_id)
@@ -258,6 +275,8 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             f"2. Выберите тип устройства\n"
         )
 
+        # Просто шлем новое сообщение с ключом.
+        # Главное фото-меню НЕ УДАЛЯЕМ.
         await callback.message.answer(
             success_text,
             parse_mode="HTML",
@@ -265,15 +284,12 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             reply_markup=get_instruction_platforms_kb()
         )
     else:
-        #
         error_message = result_data
         if error_message == "Вы уже активировали пробный период.":
-            await callback.answer(
-                "Вы уже использовали пробный период.",
-                show_alert=True
-            )
-            await callback.answer()
+            # (На случай если проверка выше дала сбой)
+            await callback.answer("Вы уже использовали пробный период.", show_alert=True)
         else:
+            # Просто показываем алерт, меню не трогаем
             await callback.answer(error_message, show_alert=True)
 
 
@@ -343,22 +359,31 @@ async def select_country_show_tariffs(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "menu:keys")
-async def menu_keys_show_first_page(callback: CallbackQuery):
-    """Показывает ПЕРВУЮ страницу ключей пользователя. (Модель 2)"""
+async def menu_keys_show_first_page(callback: CallbackQuery, bot: Bot):
+    """Показывает ПЕРВУЮ страницу ключей пользователя."""
     await callback.answer()
 
     user_id = callback.from_user.id
     page = 0
     page_size = 5
 
+    try:
+        # 1. Удаляем фото-меню
+        await callback.message.delete()
+    except AiogramError as e:
+        log.info(f"Не удалось удалить сообщение в menu:keys: {e}")
+
     total_keys = await db.count_user_keys(user_id)
     if total_keys == 0:
-        await callback.message.edit_caption(
+        # 2. Шлем новое текстовое меню (случай "нет ключей")
+        new_menu_message = await callback.message.answer(
             "У вас пока нет купленных ключей.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text="📋 Главное меню", callback_data="menu:main")]]
             ),
         )
+        # 3. Сохраняем ID нового меню
+        await db.update_user_menu_id(user_id, new_menu_message.message_id)
         return
 
     keys_on_page = await db.get_user_keys(user_id, page=page, page_size=page_size)
@@ -369,7 +394,10 @@ async def menu_keys_show_first_page(callback: CallbackQuery):
     if total_pages > 1:
         text += f"\n\n📄 Страница {page + 1} из {total_pages}"
 
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    # 2. Шлем новое текстовое меню (случай "есть ключи")
+    new_menu_message = await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    # 3. Сохраняем ID нового меню
+    await db.update_user_menu_id(user_id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data.startswith("mykeys_page:"))
@@ -547,13 +575,24 @@ async def menu_static(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "menu:instruction")
-async def menu_instruction_platforms(callback: CallbackQuery):
+async def menu_instruction_platforms(callback: CallbackQuery, bot: Bot):
     """Показывает выбор ОС для инструкции."""
-    await callback.message.edit_caption(
+    await callback.answer()
+
+    try:
+        # 1. Удаляем фото-меню
+        await callback.message.delete()
+    except AiogramError as e:
+        log.info(f"Не удалось удалить сообщение в menu:instruction: {e}")
+
+    # 2. Шлем новое текстовое меню
+    new_menu_message = await callback.message.answer(
         TEXT_INSTRUCTION_MENU,
         reply_markup=get_instruction_platforms_kb(),
         parse_mode="Markdown"
     )
+    # 3. Сохраняем ID нового меню
+    await db.update_user_menu_id(callback.from_user.id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data.startswith("instruction:"))
@@ -639,30 +678,25 @@ async def menu_instruction_detail(callback: CallbackQuery, bot: Bot):
 
 
 @router.callback_query(F.data == "menu:support")
-async def menu_support(callback: CallbackQuery):
+async def menu_support(callback: CallbackQuery, bot: Bot):
     """Показывает контакт поддержки и ссылку на оферту."""
-    log.info("Вошли в обработчик menu_support")
+    await callback.answer()
+
     try:
-        kb = get_support_kb()
-        kb_json = kb.model_dump_json(indent=2)
-        log.info(f"Сгенерирована клавиатура:\n{kb_json}")
-
-        # ЗАДАЧА 3: Используем TEXT_SUPPORT
-        await callback.message.edit_caption(
-            caption=TEXT_SUPPORT,
-            reply_markup=kb
-        )
-
-        log.info("Вызов edit_caption успешно завершен.")
-        await callback.answer()
-        log.info("Вызов callback.answer() успешно завершен.")
+        # 1. Удаляем фото-меню
+        await callback.message.delete()
     except AiogramError as e:
-        if "message is not modified" not in str(e).lower():
-            log.error(f"AiogramError в menu_support: {e}")
-            await callback.answer("Произошла ошибка при обновлении меню.", show_alert=True)
-    except Exception as e:
-        log.exception("Непредвиденная ошибка в menu_support:")
-        await callback.answer("Произошла критическая ошибка.", show_alert=True)
+        log.info(f"Не удалось удалить сообщение в menu:support: {e}")
+
+    kb = get_support_kb()
+
+    # 2. Шлем новое текстовое меню
+    new_menu_message = await callback.message.answer(
+        TEXT_SUPPORT,
+        reply_markup=kb
+    )
+    # 3. Сохраняем ID нового меню
+    await db.update_user_menu_id(callback.from_user.id, new_menu_message.message_id)
 
 
 @router.callback_query(F.data.startswith("buy_product:"))
