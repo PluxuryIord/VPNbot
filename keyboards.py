@@ -27,7 +27,7 @@ def get_main_menu_kb(user_id: int, has_keys: bool = False) -> InlineKeyboardMark
     ]
 
     if has_keys:
-         keyboard.append([InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
+        keyboard.append([InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
 
     keyboard.append([
         InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
@@ -352,7 +352,6 @@ def get_trial_already_used_kb() -> InlineKeyboardMarkup:
     )
 
 
-
 def get_take_trial_reminder_kb() -> InlineKeyboardMarkup:
     """
     Клавиатура для напоминания (спустя 24ч) о том, что можно взять триал.
@@ -360,3 +359,18 @@ def get_take_trial_reminder_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 Попробовать бесплатно (24ч)", callback_data="trial:get")]
     ])
+
+
+# def get_zero_traffic_reminder_kb() -> InlineKeyboardMarkup:
+#     """
+#     Клавиатура для напоминания о том, что трафик не используется.
+#     Ведет в Инструкцию и Поддержку.
+#     """
+#     return InlineKeyboardMarkup(inline_keyboard=[
+#         [
+#             InlineKeyboardButton(text="ℹ️ Посмотреть инструкцию", callback_data="menu:instruction"),
+#         ],
+#         [
+#             InlineKeyboardButton(text="💬 Написать в поддержку", callback_data="menu:support")
+#         ]
+#     ])

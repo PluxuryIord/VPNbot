@@ -4,9 +4,11 @@ import logging
 import math
 import crypto_pay
 import json
+from pathlib import Path
+
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, FSInputFile
 from aiogram.filters import CommandStart
 from aiogram.exceptions import AiogramError
 from config import settings
@@ -28,7 +30,7 @@ router.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
 
 router = Router()
 
-MAIN_MENU_PHOTO_ID = "AgACAgIAAxkBAAIJEGkOhERO-jqywbMpUzH_gyKfYn2EAALUEGsb9b5wSICwqZ7eVYNoAQADAgADeQADNgQ"
+MAIN_MENU_PHOTO_ID = FSInputFile(Path(__file__).resolve().parent.parent / "menu_photo.jpg")
 
 TEXT_INSTRUCTION_MENU = "ℹ️ **Инструкция**\n\nВыберите вашу операционную систему:"
 TEXT_ANDROID = """
