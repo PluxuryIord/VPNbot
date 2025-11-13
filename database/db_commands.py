@@ -455,3 +455,89 @@ async def mark_trial_reminder_sent(user_id: int):
             )
             await session.execute(stmt)
             await session.commit()
+
+
+async def count_all_users() -> int:
+    """Считает общее количество пользователей."""
+    async with AsyncSessionLocal() as session:
+        stmt = select(func.count()).select_from(Users)
+        result = await session.execute(stmt)
+        count = result.scalar_one_or_none()
+        return count if count is not None else 0
+
+
+async def get_all_users_paginated(page: int = 0, page_size: int = 10):
+    """
+    Получает список всех пользователей с пагинацией.
+    Возвращает базовую информацию: user_id, username, first_name, created_at.
+    """
+    async with AsyncSessionLocal() as session:
+        offset = page * page_size
+        stmt = (
+            select(Users)
+            .order_by(Users.c.created_at.desc())  # Сначала новые пользователи
+            .limit(page_size)
+            .offset(offset)
+        )
+        result = await session.execute(stmt)
+        return result.fetchall()
+
+
+async def get_user_stats_detailed(user_id: int):
+    """
+    Получает детальную статистику по пользователю:
+    - Информация о пользователе
+    - Количество заказов и общая сумма
+    - Список всех ключей с деталями
+    """
+    async with AsyncSessionLocal() as session:
+        # 1. Информация о пользователе
+        user_stmt = select(Users).where(Users.c.user_id == user_id)
+        user_result = await session.execute(user_stmt)
+        user = user_result.fetchone()
+
+        if not user:
+            return None
+
+        # 2. Статистика по заказам
+        orders_stmt = (
+            select(
+                func.count(Orders.c.id).label('total_orders'),
+                func.sum(Orders.c.amount).label('total_spent')
+            )
+            .where(
+                (Orders.c.user_id == user_id) &
+                (Orders.c.status == 'paid')
+            )
+        )
+        orders_result = await session.execute(orders_stmt)
+        orders_stats = orders_result.fetchone()
+
+        # 3. Список всех ключей с деталями
+        now = datetime.datetime.now()
+        keys_stmt = (
+            select(
+                Keys.c.id,
+                Keys.c.vless_key,
+                Keys.c.created_at,
+                Keys.c.expires_at,
+                Keys.c.order_id,
+                Products.c.name.label("product_name"),
+                Products.c.duration_days
+            )
+            .outerjoin(Orders, Keys.c.order_id == Orders.c.id)
+            .outerjoin(Products, Orders.c.product_id == Products.c.id)
+            .where(Keys.c.user_id == user_id)
+            .order_by(Keys.c.expires_at.desc())  # Сначала активные
+        )
+        keys_result = await session.execute(keys_stmt)
+        keys = keys_result.fetchall()
+
+        return {
+            'user': user,
+            'total_orders': orders_stats.total_orders or 0,
+            'total_spent': orders_stats.total_spent or 0.0,
+            'keys': keys,
+            'active_keys_count': sum(1 for k in keys if k.expires_at > now),
+            'total_keys_count': len(keys)
+        }

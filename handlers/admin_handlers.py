@@ -14,7 +14,9 @@ from aiogram.exceptions import AiogramError
 
 from config import settings
 from database import db_commands as db
-from keyboards import get_admin_menu_kb, get_back_to_admin_kb, get_admin_stats_kb, get_broadcast_confirmation_kb
+from keyboards import (get_admin_menu_kb, get_back_to_admin_kb, get_admin_stats_kb,
+                       get_broadcast_confirmation_kb, get_users_list_kb, get_user_card_kb)
+import vpn_api
 
 
 # Кастомный фильтр для проверки ID админа
@@ -35,15 +37,17 @@ class BroadcastState(StatesGroup):
 
 
 
-async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: int = 0):
+async def build_and_send_users_list(update_obj: Message | CallbackQuery, page: int = 0):
     """
-    Единая функция для генерации и отправки страницы статистики.
-    (Версия с флагами стран)
+    Единая функция для генерации и отправки списка пользователей с пагинацией.
     """
+    page_size = 10
+
     try:
-        active_keys = await db.get_all_active_keys_details()
+        total_users = await db.count_all_users()
+        users_on_page = await db.get_all_users_paginated(page=page, page_size=page_size)
     except Exception as e:
-        logging.error(f"Ошибка получения статистики из БД: {e}")
+        logging.error(f"Ошибка получения списка пользователей из БД: {e}")
         error_text = f"❌ Ошибка при получении данных из БД: {e}"
         if isinstance(update_obj, Message):
             await update_obj.answer(error_text, reply_markup=get_back_to_admin_kb())
@@ -51,131 +55,157 @@ async def build_and_send_stats_page(update_obj: Message | CallbackQuery, page: i
             await update_obj.answer("Ошибка БД", show_alert=True)
         return
 
-    if not active_keys:
-        no_keys_text = "Активных ключей не найдено."
+    if total_users == 0:
+        no_users_text = "Пользователей не найдено."
         if isinstance(update_obj, Message):
-            await update_obj.answer(no_keys_text, reply_markup=get_back_to_admin_kb())
+            await update_obj.answer(no_users_text, reply_markup=get_back_to_admin_kb())
         else:
-            await update_obj.message.edit_text(no_keys_text, reply_markup=get_back_to_admin_kb())
+            await update_obj.message.edit_text(no_users_text, reply_markup=get_back_to_admin_kb())
             await update_obj.answer()
         return
 
-    total_active = len(active_keys)
-    server_stats = defaultdict(int)
-    for key in active_keys:
-        try:
-            server_address = key.vless_key.split('@')[1].split(':')[0]
-        except Exception:
-            server_address = "Unknown"
-        server_stats[server_address] += 1
-
-    server_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
-
-    def _get_flag_for_country(country_name: str) -> str:
-        if country_name == "Финляндия": return "🇫🇮"
-        if country_name == "Германия": return "🇩🇪"
-        if country_name == "Нидерланды": return "🇳🇱"
-        return "🏳️"
-
-    summary = f"📊 <b>Общая статистика</b>\n\n"
-    summary += f"Всего активных ключей: <b>{total_active}</b>\n"
-    summary += "Распределение по серверам (IP/домен):\n"
-
-    sorted_servers = sorted(server_stats.items(), key=lambda item: item[1], reverse=True)
-
-    for server_ip, count in sorted_servers:
-        country = server_to_country.get(server_ip, "Unknown")
-        flag = _get_flag_for_country(country)
-        summary += f"  - {flag} <code>{server_ip}</code>: <b>{count}</b> шт.\n"
-
-    page_size = 5
-    total_pages = math.ceil(total_active / page_size)
+    total_pages = math.ceil(total_users / page_size)
     page = max(0, min(page, total_pages - 1))
 
-    start_index = page * page_size
-    end_index = start_index + page_size
-    keys_on_page = active_keys[start_index:end_index]
+    # Формируем текст сообщения
+    text = f"📊 <b>Статистика пользователей</b> (Стр. {page + 1}/{total_pages})\n\n"
+    text += f"Всего пользователей: <b>{total_users}</b>\n\n"
+    text += "Нажмите на пользователя для просмотра деталей:"
 
-    detailed_report = "📈 <b>Детальный отчет по активным ключам:</b>\n\n"
-    if not keys_on_page and total_active > 0:
-        detailed_report += "На этой странице ключей нет."
-
-    now = datetime.datetime.now()  #
-
-    for key in keys_on_page:
-        server_address = "Unknown"
-        flag = "🏳️"
-        try:
-            server_address = key.vless_key.split('@')[1].split(':')[0]
-            country = server_to_country.get(server_address, "Unknown")
-            flag = _get_flag_for_country(country)
-        except Exception:
-            pass
-
-        user_info = ""
-        if key.username:
-            user_info = f"@{key.username}"
-        else:
-            safe_name = html.escape(key.first_name or f"User {key.user_id}")
-            user_info = f'<a href="tg://user?id={key.user_id}">{safe_name}</a>'
-
-        product_info = "Пробный (1 день)"
-        if key.product_name:
-            product_info = f"{key.product_name} ({key.duration_days} дн.)"
-
-        expires_dt = key.expires_at
-        expires_str_abs = expires_dt.strftime('%Y-%m-%d %H:%M')
-        relative_str = ""
-
-        if expires_dt > now:
-            remaining = expires_dt - now
-            days = remaining.days
-            hours = remaining.seconds // 3600
-            if days > 0:
-                relative_str = f" (Осталось {days} д.)"
-            elif hours > 0:
-                relative_str = f" (Осталось {hours} ч.)"
-            else:
-                relative_str = f" (Меньше часа)"
-        else:
-            relative_str = " (Истек)"
-
-        expires_str = f"{expires_str_abs} {relative_str}"
-
-        detailed_report += (
-            f"👤 <b>{user_info}</b>\n"
-            f"  - 🖥️ Сервер: {flag} <code>{server_address}</code>\n"
-            f"  - 📦 Тариф: {product_info}\n"
-            f"  - ⏰ Истекает: {expires_str}\n\n"
-        )
-
-    page_indicator = ""
-    if total_pages > 1:
-        page_indicator = f"\n\n📄 Страница {page + 1} / {total_pages}"
-
-    final_text = summary + detailed_report + page_indicator
-
-    kb = get_admin_stats_kb(page, total_pages)
+    kb = get_users_list_kb(users_on_page, total_users, page=page, page_size=page_size)
 
     try:
         if isinstance(update_obj, Message):
-            await update_obj.answer(final_text, reply_markup=kb, parse_mode="HTML")
+            await update_obj.answer(text, reply_markup=kb, parse_mode="HTML")
         else:
-            await update_obj.message.edit_text(final_text, reply_markup=kb, parse_mode="HTML")
+            await update_obj.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
             await update_obj.answer()
 
     except AiogramError as e:
         if "message is not modified" in str(e).lower():
             await update_obj.answer("Вы уже на этой странице.")
         else:
-            logging.error(f"Error sending stats page: {e}")
+            logging.error(f"Error sending users list: {e}")
             await update_obj.answer("Ошибка при обновлении страницы.", show_alert=True)
     except Exception as e:
-        logging.error(f"Unexpected error sending stats page: {e}")
+        logging.error(f"Unexpected error sending users list: {e}")
         if isinstance(update_obj, Message):
             await update_obj.answer("Неожиданная ошибка.")
         else:
             await update_obj.answer("Неожиданная ошибка.", show_alert=True)
+
+
+async def build_and_send_user_card(callback: CallbackQuery, user_id: int, page: int):
+    """
+    Формирует и отправляет детальную карточку пользователя.
+    """
+    try:
+        user_stats = await db.get_user_stats_detailed(user_id)
+    except Exception as e:
+        logging.error(f"Ошибка получения статистики пользователя {user_id}: {e}")
+        await callback.answer("Ошибка при получении данных пользователя.", show_alert=True)
+        return
+
+    if not user_stats:
+        await callback.answer("Пользователь не найден.", show_alert=True)
+        return
+
+    user = user_stats['user']
+
+    # Формируем заголовок карточки
+    username_display = f"@{user.username}" if user.username else user.first_name
+    if not user.username and not user.first_name:
+        username_display = f"User {user.user_id}"
+
+    text = f"👤 <b>Пользователь: {html.escape(username_display)}</b>\n"
+    text += f"ID: <code>{user.user_id}</code>\n"
+    if user.first_name:
+        text += f"Имя: {html.escape(user.first_name)}\n"
+    text += f"Регистрация: {user.created_at.strftime('%Y-%m-%d %H:%M')}\n\n"
+
+    # Финансовая статистика
+    text += f"💰 <b>Финансы:</b>\n"
+    text += f"Всего потрачено: <b>{user_stats['total_spent']:.2f} ₽</b>\n"
+    text += f"Всего заказов: <b>{user_stats['total_orders']}</b>\n\n"
+
+    # Статистика по ключам
+    text += f"🔑 <b>Ключи</b> (Активные: {user_stats['active_keys_count']}, Всего: {user_stats['total_keys_count']}):\n\n"
+
+    if user_stats['keys']:
+        now = datetime.datetime.now()
+        server_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
+
+        def _get_flag_for_country(country_name: str) -> str:
+            if country_name == "Финляндия": return "🇫🇮"
+            if country_name == "Германия": return "🇩🇪"
+            if country_name == "Нидерланды": return "🇳🇱"
+            return "🏳️"
+
+        for idx, key in enumerate(user_stats['keys'], 1):
+            # Определяем статус ключа
+            is_active = key.expires_at > now
+            status_icon = "✅" if is_active else "❌"
+            status_text = "Активен" if is_active else "Истек"
+
+            # Определяем сервер и страну
+            server_address = "Unknown"
+            country = "Unknown"
+            flag = "🏳️"
+            try:
+                server_address = key.vless_key.split('@')[1].split(':')[0]
+                country = server_to_country.get(server_address, "Unknown")
+                flag = _get_flag_for_country(country)
+            except Exception:
+                pass
+
+            # Определяем тариф
+            if key.product_name:
+                tariff = f"{key.product_name}"
+            else:
+                tariff = "Пробный (1 день)"
+
+            # Формируем информацию о сроке действия
+            expires_str = key.expires_at.strftime('%Y-%m-%d')
+            if is_active:
+                remaining = key.expires_at - now
+                days_left = remaining.days
+                if days_left > 0:
+                    time_info = f"через {days_left} д."
+                else:
+                    hours_left = remaining.seconds // 3600
+                    time_info = f"через {hours_left} ч." if hours_left > 0 else "меньше часа"
+            else:
+                time_info = f"истек {expires_str}"
+
+            # Получаем статистику трафика
+            traffic_info = "Трафик: н/д"
+            try:
+                if key.vless_key:
+                    traffic_data = await vpn_api.get_traffic_by_vless_key(key.vless_key)
+                    if traffic_data:
+                        traffic_formatted = vpn_api.format_traffic(traffic_data['total'])
+                        traffic_info = f"Трафик: {traffic_formatted} / ∞"
+            except Exception as e:
+                logging.error(f"Error getting traffic for key {key.id}: {e}")
+
+            text += f"{status_icon} <b>Ключ #{idx}</b> ({status_text})\n"
+            text += f"  Сервер: {flag} {country}\n"
+            text += f"  Тариф: {tariff}\n"
+            text += f"  Истекает: {expires_str} ({time_info})\n"
+            text += f"  {traffic_info}\n"
+            text += "\n"
+    else:
+        text += "У пользователя нет ключей.\n"
+
+    kb = get_user_card_kb(page)
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await callback.answer()
+    except AiogramError as e:
+        if "message is not modified" not in str(e).lower():
+            logging.error(f"Error sending user card: {e}")
+            await callback.answer("Ошибка при отображении карточки.", show_alert=True)
 
 
 
@@ -191,9 +221,9 @@ async def cmd_admin(message: Message):
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
-    """Показывает статистику (команда) - СТРАНИЦА 1"""
+    """Показывает статистику пользователей (команда) - СТРАНИЦА 1"""
     await message.answer("⏳ Собираю статистику... Пожалуйста, подождите.")
-    await build_and_send_stats_page(message, page=0)
+    await build_and_send_users_list(message, page=0)
 
 
 @router.message(Command("broadcast"))
@@ -298,21 +328,35 @@ async def menu_admin_main(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:stats")
 async def menu_admin_stats(callback: CallbackQuery):
-    """Кнопка 'Статистика' - СТРАНИЦА 1"""
+    """Кнопка 'Статистика' - показывает список пользователей"""
     await callback.answer("⏳ Собираю статистику...")
-    await build_and_send_stats_page(callback, page=0)
+    await build_and_send_users_list(callback, page=0)
 
 
-@router.callback_query(F.data.startswith("admin:stats_page:"))
-async def paginate_admin_stats(callback: CallbackQuery):
-    """Пагинация для статистики"""
+@router.callback_query(F.data.startswith("admin:users_page:"))
+async def paginate_users_list(callback: CallbackQuery):
+    """Пагинация для списка пользователей"""
     try:
         page = int(callback.data.split(":")[-1])
     except (ValueError, IndexError):
         await callback.answer("Ошибка страницы.", show_alert=True)
         return
 
-    await build_and_send_stats_page(callback, page=page)
+    await build_and_send_users_list(callback, page=page)
+
+
+@router.callback_query(F.data.startswith("admin:user_card:"))
+async def show_user_card(callback: CallbackQuery):
+    """Показывает детальную карточку пользователя"""
+    try:
+        parts = callback.data.split(":")
+        user_id = int(parts[2])
+        page = int(parts[3])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка получения данных пользователя.", show_alert=True)
+        return
+
+    await build_and_send_user_card(callback, user_id, page)
 
 
 @router.callback_query(F.data == "admin:broadcast")

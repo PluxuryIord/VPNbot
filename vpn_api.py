@@ -191,3 +191,142 @@ async def delete_vless_user(server_config: XuiServer, client_id: str) -> bool:
         except Exception as e:
             log.error(f"[XUI_API] Error during delClient on {server_config.name}: {e}")
             return False
+
+
+async def get_client_traffic(server_config: XuiServer, client_uuid: str) -> dict | None:
+    """
+    Получает статистику трафика для конкретного клиента.
+    Использует endpoint GET /panel/api/inbounds/list
+
+    Возвращает словарь с данными:
+    {
+        'up': int,      # Исходящий трафик в байтах
+        'down': int,    # Входящий трафик в байтах
+        'total': int,   # Общий трафик в байтах
+        'email': str,   # Email клиента
+        'enable': bool  # Активен ли клиент
+    }
+
+    Возвращает None если клиент не найден или произошла ошибка.
+    """
+    async with get_xui_client(server_config) as client:
+        if client is None:
+            log.error(f"[XUI_API] Client session is None for {server_config.name}, login likely failed.")
+            return None
+
+        url = f"{server_config.host.rstrip('/')}/panel/api/inbounds/list"
+        try:
+            response = await client.get(url)
+            if response.status_code != 200:
+                log.error(f"[XUI_API] inbounds/list failed! Status: {response.status_code} at {url}")
+                log.error(f"[XUI_API] Response: {response.text}")
+                return None
+
+            resp_data = response.json()
+            if not resp_data.get('success'):
+                log.error(f"[XUI_API] inbounds/list API returned false: {resp_data}")
+                return None
+
+            # Ищем нужный inbound
+            inbounds = resp_data.get('obj', [])
+            target_inbound = None
+
+            for inbound in inbounds:
+                if inbound.get('id') == server_config.inbound_id:
+                    target_inbound = inbound
+                    break
+
+            if not target_inbound:
+                log.warning(f"[XUI_API] Inbound {server_config.inbound_id} not found on {server_config.name}")
+                return None
+
+            # Парсим настройки клиентов
+            settings_str = target_inbound.get('settings', '{}')
+            try:
+                settings = json.loads(settings_str)
+            except json.JSONDecodeError:
+                log.error(f"[XUI_API] Failed to parse settings JSON for inbound {server_config.inbound_id}")
+                return None
+
+            clients = settings.get('clients', [])
+
+            # Ищем клиента по UUID
+            for client_data in clients:
+                if client_data.get('id') == client_uuid:
+                    # Получаем статистику клиента
+                    client_stats = target_inbound.get('clientStats', [])
+
+                    # Ищем статистику для этого email
+                    email = client_data.get('email', '')
+                    traffic_data = {
+                        'up': 0,
+                        'down': 0,
+                        'total': 0,
+                        'email': email,
+                        'enable': client_data.get('enable', False)
+                    }
+
+                    for stat in client_stats:
+                        if stat.get('email') == email:
+                            traffic_data['up'] = stat.get('up', 0)
+                            traffic_data['down'] = stat.get('down', 0)
+                            traffic_data['total'] = traffic_data['up'] + traffic_data['down']
+                            break
+
+                    log.info(f"[XUI_API] Got traffic stats for client {client_uuid} on {server_config.name}: {traffic_data['total']} bytes")
+                    return traffic_data
+
+            log.warning(f"[XUI_API] Client {client_uuid} not found in inbound {server_config.inbound_id}")
+            return None
+
+        except Exception as e:
+            log.error(f"[XUI_API] Error getting client traffic from {server_config.name}: {e}")
+            return None
+
+
+
+def format_traffic(bytes_count: int) -> str:
+    """
+    Форматирует количество байт в читаемый вид (КБ, МБ, ГБ).
+    """
+    if bytes_count < 1024:
+        return f"{bytes_count} Б"
+    elif bytes_count < 1024 * 1024:
+        return f"{bytes_count / 1024:.2f} КБ"
+    elif bytes_count < 1024 * 1024 * 1024:
+        return f"{bytes_count / (1024 * 1024):.2f} МБ"
+    else:
+        return f"{bytes_count / (1024 * 1024 * 1024):.2f} ГБ"
+
+
+async def get_traffic_by_vless_key(vless_key: str) -> dict | None:
+    """
+    Получает статистику трафика по VLESS ключу.
+    Извлекает UUID и сервер из ключа, находит соответствующий server_config
+    и получает статистику трафика.
+
+    Возвращает словарь с данными или None если не удалось получить.
+    """
+    try:
+        # Извлекаем UUID и сервер из vless://<uuid>@<server>:<port>
+        client_uuid = vless_key.split('vless://')[1].split('@')[0]
+        server_host = vless_key.split('@')[1].split(':')[0]
+
+        # Находим соответствующий server_config
+        server_config = None
+        for s in settings.XUI_SERVERS:
+            if s.vless_server == server_host:
+                server_config = s
+                break
+
+        if not server_config:
+            log.warning(f"[XUI_API] Server config not found for host {server_host}")
+            return None
+
+        # Получаем статистику трафика
+        traffic_data = await get_client_traffic(server_config, client_uuid)
+        return traffic_data
+
+    except Exception as e:
+        log.error(f"[XUI_API] Error parsing vless key or getting traffic: {e}")
+        return None

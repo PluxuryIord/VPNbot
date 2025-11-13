@@ -374,3 +374,66 @@ def get_take_trial_reminder_kb() -> InlineKeyboardMarkup:
 #             InlineKeyboardButton(text="💬 Написать в поддержку", callback_data="menu:support")
 #         ]
 #     ])
+
+
+def get_users_list_kb(users_on_page: list, total_users: int, page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
+    """
+    Генерирует клавиатуру для списка пользователей с пагинацией.
+    Каждая кнопка ведет на карточку пользователя.
+    """
+    keyboard = []
+
+    # Кнопки с пользователями
+    if users_on_page:
+        for user in users_on_page:
+            # Формируем текст кнопки
+            username_display = f"@{user.username}" if user.username else user.first_name
+            if not user.username and not user.first_name:
+                username_display = f"User {user.user_id}"
+
+            btn_text = f"👤 {username_display} (ID: {user.user_id})"
+
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=btn_text,
+                    callback_data=f"admin:user_card:{user.user_id}:{page}"
+                )
+            ])
+
+    # Навигация
+    total_pages = math.ceil(total_users / page_size)
+    nav_row = []
+
+    if page > 0:
+        nav_row.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"admin:users_page:{page - 1}")
+        )
+
+    if total_pages > 1:
+        nav_row.append(
+            InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore")
+        )
+
+    if page + 1 < total_pages:
+        nav_row.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"admin:users_page:{page + 1}")
+        )
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    # Кнопка "Назад в админ-меню"
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад в админ-меню", callback_data="admin:main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_user_card_kb(page: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для карточки пользователя.
+    Кнопка "Назад" возвращает к списку пользователей на той же странице.
+    """
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"admin:users_page:{page}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
