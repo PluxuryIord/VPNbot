@@ -261,7 +261,34 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             await db.update_key_expiry(renewal_key_id, new_expiry_date)
             log.info(f"Ключ {renewal_key_id} продлен до {new_expiry_date}.")
 
-            #
+            # Синхронизируем срок действия на панели X-UI
+            try:
+                vless_key_str = key_to_renew.vless_key or ""
+                # Извлекаем UUID и сервер из vless://<uuid>@<server>:<port>
+                client_uuid = vless_key_str.split('vless://')[1].split('@')[0]
+                server_host = vless_key_str.split('@')[1].split(':')[0]
+                server_config = next((s for s in settings.XUI_SERVERS if s.vless_server == server_host), None)
+                if server_config:
+                    new_expiry_ts = int(new_expiry_date.timestamp() * 1000)
+                    updated = await vpn_api.update_vless_user_expiry(server_config, client_uuid, new_expiry_ts)
+                    if not updated:
+                        # Фолбэк: удалить и создать клиента заново с нужным сроком
+                        deleted = await vpn_api.delete_vless_user(server_config, client_uuid)
+                        if not deleted:
+                            log.error(f"[Renewal] Не удалось удалить клиента {client_uuid} на {server_config.name} для продления.")
+                        # Ставим дни так, чтобы конечная дата была близка к new_expiry_date
+                        delta_days = max(1, int((new_expiry_date - datetime.datetime.now()).total_seconds() // 86400))
+                        readded = await vpn_api.add_vless_user(server_config, user_id=user_id, days=delta_days, new_uuid=client_uuid)
+                        if readded:
+                            log.info(f"[Renewal] Клиент {client_uuid} пересоздан c новой датой на {server_config.name}")
+                        else:
+                            log.error(f"[Renewal] Не удалось пересоздать клиента {client_uuid} на {server_config.name}")
+                else:
+                    log.error(f"[Renewal] Не найден server_config для {server_host}; панель не обновлена.")
+            except Exception as sync_e:
+                log.error(f"[Renewal] Ошибка синхронизации продления на панели: {sync_e}")
+
+            # Сообщение пользователю
             message_text = (
                 f"✅ <b>Ключ успешно продлен!</b>\n\n"
                 f"Тариф: <b>{product.name}</b>\n"

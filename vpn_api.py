@@ -124,3 +124,70 @@ async def add_vless_user(server_config: XuiServer, user_id: int, days: int, new_
         except Exception as e:
             log.error(f"[XUI_API] Error during addClient request to {server_config.name}: {e}")
             return False
+
+
+async def update_vless_user_expiry(server_config: XuiServer, client_id: str, new_expiry_timestamp: int) -> bool:
+    """
+    Обновляет срок действия (expiryTime) существующего клиента VLESS на панели.
+    Требует 3x-ui API: POST /panel/api/inbounds/updateClient/:clientId
+    Body: id (inbound id), settings (json c изменяемыми полями)
+    """
+    payload = {
+        'id': str(server_config.inbound_id),
+        'settings': json.dumps({
+            'expiryTime': new_expiry_timestamp,
+        })
+    }
+
+    async with get_xui_client(server_config) as client:
+        if client is None:
+            log.error(f"[XUI_API] Client session is None for {server_config.name}, login likely failed.")
+            return False
+
+        url = f"{server_config.host.rstrip('/')}/panel/api/inbounds/updateClient/{client_id}"
+        try:
+            response = await client.post(url, data=payload)
+            if response.status_code != 200:
+                log.error(f"[XUI_API] updateClient failed! Status: {response.status_code} at {url}")
+                log.error(f"[XUI_API] Response: {response.text}")
+                return False
+
+            resp_data = response.json()
+            if resp_data.get('success'):
+                log.info(f"[XUI_API] Updated expiry for client {client_id} on {server_config.name}")
+                return True
+            else:
+                log.error(f"[XUI_API] updateClient API returned false: {resp_data}")
+                return False
+        except Exception as e:
+            log.error(f"[XUI_API] Error during updateClient to {server_config.name}: {e}")
+            return False
+
+
+async def delete_vless_user(server_config: XuiServer, client_id: str) -> bool:
+    """
+    Удаляет клиента по его clientId (UUID) из inbound.
+    3x-ui API: POST /panel/api/inbounds/:id/delClient/:clientId
+    """
+    async with get_xui_client(server_config) as client:
+        if client is None:
+            log.error(f"[XUI_API] Client session is None for {server_config.name}, login likely failed.")
+            return False
+
+        url = f"{server_config.host.rstrip('/')}/panel/api/inbounds/{server_config.inbound_id}/delClient/{client_id}"
+        try:
+            response = await client.post(url)
+            if response.status_code != 200:
+                log.error(f"[XUI_API] delClient failed! Status: {response.status_code} at {url}")
+                log.error(f"[XUI_API] Response: {response.text}")
+                return False
+            resp_data = response.json()
+            if resp_data.get('success'):
+                log.info(f"[XUI_API] Deleted client {client_id} from {server_config.name}")
+                return True
+            else:
+                log.error(f"[XUI_API] delClient API returned false: {resp_data}")
+                return False
+        except Exception as e:
+            log.error(f"[XUI_API] Error during delClient on {server_config.name}: {e}")
+            return False
