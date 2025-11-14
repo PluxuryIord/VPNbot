@@ -211,3 +211,13 @@ collect_project.py
 project_files.txt
 test.py
 main2.py
+apply_migration.py
+CRM_CHANGELOG.md
+CRM_CHECKLIST.md
+CRM_COMMANDS.md
+CRM_EXAMPLES.md
+CRM_README.md
+QUICK_CRM_START.md
+CRM_SETUP.md
+migrate_users_to_crm.py
+test_crm.py

@@ -457,6 +457,28 @@ async def mark_trial_reminder_sent(user_id: int):
             await session.commit()
 
 
+async def update_user_topic_id(user_id: int, topic_id: int):
+    """Обновляет ID топика для пользователя в CRM-группе."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = (
+                update(Users)
+                .where(Users.c.user_id == user_id)
+                .values(crm_topic_id=topic_id)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+
+async def get_user_topic_id(user_id: int) -> int | None:
+    """Получает ID топика пользователя в CRM-группе."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Users.c.crm_topic_id).where(Users.c.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+
 async def count_all_users() -> int:
     """Считает общее количество пользователей."""
     async with AsyncSessionLocal() as session:

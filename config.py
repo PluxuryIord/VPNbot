@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # --- Админы (через запятую) ---
     ADMIN_IDS: str
 
+    # --- CRM группа с топиками ---
+    CRM_GROUP_ID: Optional[int] = None  # ID группы для CRM (с включенными топиками)
+
     RUN_MODE: str = 'webhook'
 
     # --- Список серверов X-UI ---

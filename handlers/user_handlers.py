@@ -21,6 +21,7 @@ from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
 from middlewares.throttling import ThrottlingMiddleware
+import crm
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -141,6 +142,14 @@ async def cmd_start(message: Message, bot: Bot):
     )
 
     if last_menu_id is None:
+        # Новый пользователь - создаем топик в CRM
+        await crm.create_user_topic(
+            bot=bot,
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.full_name
+        )
+
         user_info = _get_user_info_for_admin(message)
         now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         await _notify_admins(bot, f"👤 Новый пользователь: {user_info}\n({now_str})")
@@ -261,10 +270,9 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
     # --- Если триал ЕЩЕ НЕ БРАЛ ---
     await callback.answer("⏳ Проверяю возможность выдачи...")
 
-    success, result_data = await issue_trial_key(bot, user_id)
+    subscription_url = await issue_trial_key(bot, user_id, callback.from_user.full_name)
 
-    if success:
-        subscription_url = result_data  #
+    if subscription_url:
         user_info = _get_user_info_for_admin(callback)
         now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         await _notify_admins(bot, f"🎁 {user_info} получил пробный ключ.\n({now_str})")
@@ -286,13 +294,8 @@ async def process_trial_get(callback: CallbackQuery, bot: Bot):
             reply_markup=get_instruction_platforms_kb()
         )
     else:
-        error_message = result_data
-        if error_message == "Вы уже активировали пробный период.":
-            # (На случай если проверка выше дала сбой)
-            await callback.answer("Вы уже использовали пробный период.", show_alert=True)
-        else:
-            # Просто показываем алерт, меню не трогаем
-            await callback.answer(error_message, show_alert=True)
+        # Просто показываем алерт, меню не трогаем
+        await callback.answer("Не удалось выдать пробный ключ. Попробуйте позже.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("special_offer:"))
@@ -727,6 +730,15 @@ async def process_buy_callback(callback: CallbackQuery, bot: Bot):
         user_id=callback.from_user.id,
         product_id=product_id,
         amount=product.price
+    )
+
+    # CRM: Уведомление о создании заказа
+    await crm.notify_payment_pending(
+        bot=callback.bot,
+        user_id=callback.from_user.id,
+        product_name=f"{product.name} ({country})",
+        amount=product.price,
+        order_id=order_id
     )
 
     kb = get_payment_method_kb(order_id, country)

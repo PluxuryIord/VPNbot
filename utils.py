@@ -11,6 +11,7 @@ from urllib.parse import quote
 from config import settings, XuiServer
 from database import db_commands as db
 import vpn_api
+import crm
 # from database.models import Orders
 
 log = logging.getLogger(__name__)
@@ -134,6 +135,15 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
             expires_at=expires_at
         )
 
+        # CRM: Уведомление о покупке ключа
+        await crm.notify_key_purchased(
+            bot=bot,
+            user_id=user_id,
+            product_name=product.name,
+            amount=product.price,
+            expires_at=expires_at.strftime('%Y-%m-%d %H:%M')
+        )
+
         log.info(f"Successfully issued key {new_uuid} for order {order_id} on server {server_config.name}")
         return True, subscription_token #
 
@@ -155,16 +165,25 @@ async def issue_key_to_user(bot: Bot, user_id: int, product_id: int, order_id: i
         return False, None
 
 
-async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
+async def issue_trial_key(bot: Bot, user_id: int, first_name: str = None, force: bool = False) -> str | None:
     """
     Выдает ОДНОРАЗОВЫЙ пробный ключ (Модель 2: ссылка-подписка).
-    Возвращает (True/False, subscription_url/error_message).
+
+    Args:
+        bot: Экземпляр бота
+        user_id: ID пользователя
+        first_name: Имя пользователя (опционально)
+        force: Если True, выдаёт триал даже если пользователь уже получал
+
+    Returns:
+        subscription_url при успехе, None при ошибке
     """
     try:
-        has_trial = await db.check_trial_status(user_id)
-        if has_trial:
-            log.warning(f"Пользователь {user_id} уже получал пробный ключ.")
-            return False, "Вы уже активировали пробный период."
+        if not force:
+            has_trial = await db.check_trial_status(user_id)
+            if has_trial:
+                log.warning(f"Пользователь {user_id} уже получал пробный ключ.")
+                return None
 
         finland_servers = [s for s in settings.XUI_SERVERS if s.country == "Финляндия"]
         if not finland_servers:
@@ -206,8 +225,15 @@ async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
         #
         subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
 
+        # CRM: Уведомление о взятии триала
+        await crm.notify_trial_taken(
+            bot=bot,
+            user_id=user_id,
+            expires_at=expires_at.strftime('%Y-%m-%d %H:%M')
+        )
+
         log.info(f"Пробный ключ {new_uuid} успешно выдан (как подписка) пользователю {user_id} на сервере {server_config.name}")
-        return True, subscription_url #
+        return subscription_url
 
     except Exception as e:
         log.error(f"Ошибка выдачи пробного ключа для {user_id}: {e}")
@@ -224,7 +250,7 @@ async def issue_trial_key(bot: Bot, user_id: int) -> tuple[bool, str | None]:
         except Exception as admin_notify_e:
             log.error(f"Не удалось уведомить админа о сбое триала: {admin_notify_e}")
 
-        return False, "Не удалось выдать пробный ключ. Попробуйте позже или свяжитесь с поддержкой."
+        return None
 
 
 async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple[bool, str, str | None]:

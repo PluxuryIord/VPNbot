@@ -9,7 +9,8 @@ from sqlalchemy.dialects.postgresql import insert
 
 from config import settings
 from database import db_commands as db
-from handlers import user_handlers, admin_handlers, webhook_handlers
+from handlers import user_handlers, admin_handlers, webhook_handlers, crm_handlers
+from middlewares.crm_filter import CRMFilterMiddleware
 
 TELEGRAM_WEBHOOK_PATH = "/webhook/telegram"
 YOOKASSA_WEBHOOK_PATH = settings.WEBHOOK_PATH
@@ -82,7 +83,12 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Регистрируем роутеры
+    # Регистрируем middleware для фильтрации CRM-топиков
+    dp.message.middleware(CRMFilterMiddleware())
+    dp.callback_query.middleware(CRMFilterMiddleware())
+
+    # Регистрируем роутеры (порядок важен!)
+    dp.include_router(crm_handlers.router)  # CRM-команды первыми
     dp.include_router(admin_handlers.router)
     dp.include_router(user_handlers.router)
 

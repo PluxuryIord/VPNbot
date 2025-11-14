@@ -6,6 +6,7 @@ from aiogram import Bot
 from database import db_commands as db
 from keyboards import get_renewal_kb, get_trial_discount_kb, get_take_trial_reminder_kb
 from config import settings
+import crm
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ async def check_expirations(bot: Bot):
                         parse_mode="Markdown"
                     )
                     await db.mark_renewal_warning_sent(key.id)
+
+                    # CRM: Уведомление об отправке предупреждения
+                    await crm.notify_renewal_warning_sent(bot, key.user_id, key.name, 24)
                 except Exception as e:
                     log.warning(f"Failed to send 24h warning to {key.user_id}: {e}")
 
@@ -44,6 +48,9 @@ async def check_expirations(bot: Bot):
                         parse_mode="Markdown"
                     )
                     await db.mark_trial_warning_sent(key.id)
+
+                    # CRM: Уведомление об отправке предупреждения о триале
+                    await crm.notify_trial_warning_sent(bot, key.user_id)
                 except Exception as e:
                     log.warning(f"Failed to send 2h trial warning to {key.user_id}: {e}")
 
@@ -71,6 +78,9 @@ async def check_expirations(bot: Bot):
                             parse_mode="Markdown"
                         )
                     await db.mark_expiry_notification_sent(key.id)
+
+                    # CRM: Уведомление об истечении ключа
+                    await crm.notify_key_expired(bot, key.user_id, is_trial=(key.order_id is None))
                 except Exception as e:
                     log.warning(f"Failed to send expiry notification to {key.user_id}: {e}")
 
@@ -87,6 +97,9 @@ async def check_expirations(bot: Bot):
                         parse_mode="Markdown"
                     )
                     await db.mark_trial_reminder_sent(user_id)
+
+                    # CRM: Уведомление об отправке напоминания о триале
+                    await crm.notify_trial_reminder_sent(bot, user_id)
                 except Exception as e:
                     log.warning(f"Failed to send trial reminder to {user_id}: {e}")
                     # Если юзер заблочил бота, тоже ставим метку, чтоб не пытаться снова

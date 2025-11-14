@@ -26,6 +26,7 @@ Users = Table(
     Column('has_received_trial', Boolean, nullable=False, default=False, server_default='false'),
     Column('last_menu_id', BigInteger, nullable=True, default=None),
     Column('has_sent_trial_reminder', Boolean, nullable=False, default=False, server_default='false'),
+    Column('crm_topic_id', Integer, nullable=True),  # ID топика в CRM-группе
 )
 
 # Таблица продуктов (тарифов)
