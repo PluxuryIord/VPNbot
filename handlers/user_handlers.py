@@ -22,6 +22,7 @@ from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
 from middlewares.throttling import ThrottlingMiddleware
 import crm
+import vpn_api
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -494,13 +495,25 @@ async def menu_key_details(callback: CallbackQuery):
         status = "❌ <b>Истек</b>"
         time_left = "0"
 
+    # Получаем статистику трафика
+    traffic_info = "Трафик: н/д"
+    try:
+        if key.vless_key:
+            traffic_data = await vpn_api.get_traffic_by_vless_key(key.vless_key)
+            if traffic_data:
+                traffic_formatted = vpn_api.format_traffic(traffic_data['total'])
+                traffic_info = f"Использовано: <b>{traffic_formatted}</b> / ∞"
+    except Exception as e:
+        log.error(f"Ошибка получения трафика для ключа {key.id}: {e}")
+
     subscription_url = f"{settings.WEBHOOK_HOST}/sub/{key.subscription_token}"
 
     text = (
         f"🔑 <b>Детали ключа</b> ({status})\n\n"
         f"Сервер: <b>{server_info}</b>\n"
         f"Истекает: <code>{key.expires_at.strftime('%Y-%m-%d %H:%M')}</code>\n"
-        f"Осталось: {time_left}\n\n"
+        f"Осталось: {time_left}\n"
+        f"{traffic_info}\n\n"
         "Ваш ключ 👇👇👇\n\n"
         f"<code>{subscription_url}</code>\n\n"
         "Нажмите на ключ 👆👆👆, чтобы скопировать"

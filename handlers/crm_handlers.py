@@ -251,26 +251,35 @@ async def cmd_trial(message: Message, bot: Bot):
         
         # Выдаём триал (независимо от статуса has_received_trial)
         log.info(f"CRM: Выдача триала пользователю {user_id} через команду /trial в топике")
-        
-        vless_key = await issue_trial_key(bot, user_id, first_name, force=True)
-        
-        if vless_key:
+
+        subscription_url = await issue_trial_key(bot, user_id, first_name, force=True)
+
+        if subscription_url:
+            # Отправляем ключ пользователю в личные сообщения
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"🎁 <b>Вам выдан пробный ключ!</b>\n\n"
+                    f"⏱ Срок действия: 24 часа\n\n"
+                    f"🔑 <b>Ваш ключ:</b>\n"
+                    f"<code>{subscription_url}</code>\n\n"
+                    f"📱 Нажмите на ключ, чтобы скопировать, и добавьте его в приложение VPN.",
+                    parse_mode="HTML"
+                )
+                log.info(f"CRM: Ключ отправлен пользователю {user_id} в личные сообщения")
+            except Exception as send_error:
+                log.error(f"CRM: Не удалось отправить ключ пользователю {user_id}: {send_error}")
+
+            # Подтверждение в CRM-топике
             await message.reply(
                 f"✅ <b>Пробный ключ выдан!</b>\n\n"
                 f"👤 Пользователь: {html.escape(first_name)} (ID: <code>{user_id}</code>)\n"
                 f"⏱ Срок действия: 24 часа\n\n"
-                f"🔑 Ключ:\n<code>{html.escape(vless_key)}</code>\n\n"
-                f"<i>Ключ также отправлен пользователю в личные сообщения.</i>",
+                f"🔑 Ключ:\n<code>{html.escape(subscription_url)}</code>\n\n"
+                f"<i>Ключ отправлен пользователю в личные сообщения.</i>",
                 parse_mode="HTML"
             )
-            
-            # Уведомляем в CRM
-            await crm.notify_trial_taken(
-                bot=bot,
-                user_id=user_id,
-                expires_at=(datetime.datetime.now() + datetime.timedelta(hours=24)).strftime("%d.%m.%Y %H:%M")
-            )
-            
+
             log.info(f"CRM: Триал успешно выдан пользователю {user_id}")
         else:
             await message.reply(

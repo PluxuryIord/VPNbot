@@ -221,3 +221,4 @@ QUICK_CRM_START.md
 CRM_SETUP.md
 migrate_users_to_crm.py
 test_crm.py
+check_sessions.py
