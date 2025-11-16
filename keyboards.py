@@ -373,6 +373,93 @@ def get_trial_expired_kb(key_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+# ============= CRM КЛАВИАТУРЫ =============
+
+def get_crm_keys_list_kb(keys_on_page: list, total_keys: int, page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
+    """
+    Генерирует клавиатуру со списком ключей для CRM (команда /info).
+    Каждый ключ - кликабельная кнопка.
+    """
+    keyboard = []
+    server_ip_to_country = {s.vless_server: s.country for s in settings.XUI_SERVERS}
+
+    if keys_on_page:
+        now = datetime.datetime.now()
+        for key in keys_on_page:
+            country = "Unknown"
+            flag = "🏳️"
+            try:
+                server_ip = key.vless_key.split('@')[1].split(':')[0]
+                country = server_ip_to_country.get(server_ip, "")
+            except Exception:
+                pass
+
+            flag = _get_flag_for_country(country)
+
+            if key.expires_at > now:
+                status_icon = "✅"
+                remaining = key.expires_at - now
+                days_left = remaining.days
+
+                if days_left > 0:
+                    time_left = f"(Осталось {days_left} д.)"
+                else:
+                    hours_left = remaining.seconds // 3600
+                    if hours_left > 0:
+                        time_left = f"(Осталось {hours_left} ч.)"
+                    else:
+                        time_left = "(Меньше часа)"
+            else:
+                status_icon = "❌"
+                time_left = f"(Истек {key.expires_at.strftime('%d.%m')})"
+
+            btn_text = f"{status_icon} Ключ {country} {flag} {time_left}"
+
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=btn_text,
+                    callback_data=f"crm_key_details:{key.id}:{page}"
+                )
+            ])
+
+    # Кнопки пагинации
+    total_pages = math.ceil(total_keys / page_size)
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"crm_keys_page:{page - 1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"crm_keys_page:{page + 1}"))
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_crm_key_details_kb(key_id: int, current_page: int) -> InlineKeyboardMarkup:
+    """Клавиатура для детального просмотра ключа в CRM."""
+    keyboard = [
+        [InlineKeyboardButton(text="➕ Добавить дни", callback_data=f"crm_add_days:{key_id}:{current_page}")],
+        [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"crm_keys_page:{current_page}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_crm_country_selection_kb() -> InlineKeyboardMarkup:
+    """Генерирует клавиатуру для выбора страны в CRM (команда /key)."""
+    buttons = []
+    countries = sorted(list(set(server.country for server in settings.XUI_SERVERS)))
+    for country in countries:
+        flag = _get_flag_for_country(country)
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{flag} {country}",
+                callback_data=f"crm_key_country:{country}"
+            )
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 # def get_zero_traffic_reminder_kb() -> InlineKeyboardMarkup:
 #     """
 #     Клавиатура для напоминания о том, что трафик не используется.
