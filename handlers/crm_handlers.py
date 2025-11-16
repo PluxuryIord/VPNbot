@@ -32,17 +32,20 @@ class CRMStates(StatesGroup):
 async def is_crm_topic(message: Message) -> bool:
     """
     Проверяет, что сообщение отправлено в топике CRM-группы.
-    
+
     Returns:
         True если это топик в CRM-группе, False иначе
     """
     if not settings.CRM_GROUP_ID:
         return False
-    
+
+    if not message:
+        return False
+
     # Проверяем, что это CRM-группа и есть message_thread_id (топик)
     if message.chat.id == settings.CRM_GROUP_ID and message.message_thread_id:
         return True
-    
+
     return False
 
 
