@@ -357,7 +357,19 @@ def get_take_trial_reminder_kb() -> InlineKeyboardMarkup:
     Клавиатура для напоминания (спустя 24ч) о том, что можно взять триал.
     """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Попробовать бесплатно (24ч)", callback_data="trial:get")]
+        [InlineKeyboardButton(text="🎁 Попробовать бесплатно (24ч)", callback_data="trial:get")],
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/NjordVPN_Support")]
+    ])
+
+
+def get_trial_expired_kb(key_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для уведомления об истечении пробного периода.
+    Включает кнопки "Продлить" и "Поддержка".
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Продлить сейчас", callback_data=f"key_renew:{key_id}:0")],
+        [InlineKeyboardButton(text="💬 Написать отзыв (получить 7 дней)", url="https://t.me/NjordVPN_Support")]
     ])
 
 

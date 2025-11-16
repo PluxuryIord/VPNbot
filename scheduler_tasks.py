@@ -4,7 +4,7 @@ import datetime
 
 from aiogram import Bot
 from database import db_commands as db
-from keyboards import get_renewal_kb, get_trial_discount_kb, get_take_trial_reminder_kb
+from keyboards import get_renewal_kb, get_trial_discount_kb, get_take_trial_reminder_kb, get_trial_expired_kb
 from config import settings
 import crm
 
@@ -63,9 +63,10 @@ async def check_expirations(bot: Bot):
                         await bot.send_message(
                             key.user_id,
                             "⌛️ **Ваш пробный период (24ч) истек.**\n\n"
-                            "Надеемся, вам понравилась скорость! 🇫🇮\n"
-                            "Чтобы продолжить пользоваться VPN, продлите подписку.",
-                            reply_markup=get_renewal_kb(key.id),  # Ведет на стандартное продление
+                            "Надеемся, вам понравилась скорость! 🇫🇮\n\n"
+                            "Чтобы продолжить пользоваться VPN, продлите подписку.\n\n"
+                            "💬 **Напишите в поддержку свой отзыв и получите 7 дней бесплатно!**",
+                            reply_markup=get_trial_expired_kb(key.id),
                             parse_mode="Markdown"
                         )
                     else:
@@ -92,7 +93,8 @@ async def check_expirations(bot: Bot):
                         user_id,
                         "👋 Привет!\n\n"
                         "Вы были в боте 24 часа назад, но так и не попробовали наш VPN.\n\n"
-                        "Не упускайте шанс оценить премиум-скорость (Финляндия 🇫🇮) бесплатно!",
+                        "Не упускайте шанс оценить премиум-скорость (Финляндия 🇫🇮) бесплатно!\n\n"
+                        "💬 Если нужна помощь — напишите в поддержку, мы всегда на связи!",
                         reply_markup=get_take_trial_reminder_kb(),
                         parse_mode="Markdown"
                     )
