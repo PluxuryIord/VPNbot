@@ -87,6 +87,36 @@ async def get_product_by_id(product_id: int):
         return result.fetchone()
 
 
+async def get_or_create_custom_payment_product() -> int:
+    """
+    Получает или создает специальный продукт для кастомных платежей.
+    Возвращает ID продукта.
+    """
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Ищем продукт с названием "Кастомный платеж"
+            result = await session.execute(
+                select(Products).where(Products.c.name == "Кастомный платеж")
+            )
+            product = result.fetchone()
+
+            if product:
+                return product.id
+
+            # Если не найден - создаем
+            result = await session.execute(
+                insert(Products).values(
+                    name="Кастомный платеж",
+                    price=0,  # Цена будет указана в заказе
+                    duration_days=0,  # Длительность не применима
+                    country=None  # Не привязан к стране
+                ).returning(Products.c.id)
+            )
+            product_id = result.scalar_one()
+            await session.commit()
+            return product_id
+
+
 async def create_order(user_id: int, product_id: int, amount: float) -> int:
     """Создает новый заказ в статусе 'pending' и возвращает его ID"""
     async with AsyncSessionLocal() as session:

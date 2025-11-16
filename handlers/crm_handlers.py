@@ -646,8 +646,11 @@ async def crm_payment_process(message: Message, state: FSMContext, bot: Bot):
         data = await state.get_data()
         user_id = data['user_id']
 
-        # Создаем заказ с product_id = None (кастомный платеж)
-        order_id = await db.create_order(user_id, product_id=None, amount=amount)
+        # Получаем или создаем специальный продукт для кастомных платежей
+        custom_product_id = await db.get_or_create_custom_payment_product()
+
+        # Создаем заказ с кастомным продуктом
+        order_id = await db.create_order(user_id, product_id=custom_product_id, amount=amount)
 
         if not order_id:
             await message.reply("❌ Не удалось создать заказ.")

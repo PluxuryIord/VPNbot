@@ -327,12 +327,35 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
         # --- ЛОГИКА ВЫДАЧИ НОВОГО КЛЮЧА ---
         else:
             log.info(f"[PaymentLogic] Заказ {order_id} определен как НОВАЯ ПОКУПКА.")
+
+            # Проверяем, является ли это кастомным платежом (без выдачи ключа)
+            product = await db.get_product_by_id(product_id)
+            if product and product.name == "Кастомный платеж":
+                # Это кастомный платеж от админа - не выдаем ключ
+                log.info(f"[PaymentLogic] Заказ {order_id} - кастомный платеж, ключ не выдается.")
+                message_text = (
+                    f"✅ <b>Оплата прошла успешно!</b>\n\n"
+                    f"Сумма: <b>{order.amount} ₽</b>\n\n"
+                    "Спасибо за оплату!"
+                )
+
+                # Уведомляем в CRM
+                await crm.send_to_crm(
+                    bot=bot,
+                    user_id=user_id,
+                    message=f"💰 <b>Кастомный платеж оплачен</b>\n\n"
+                            f"Сумма: <b>{order.amount} ₽</b>\n"
+                            f"Заказ: <code>{order_id}</code>"
+                )
+
+                return True, message_text, None
+
+            # Обычная покупка - выдаем ключ
             country = metadata.get("country")
             if not country:
                 log.error(f"!!! ОШИБКА: Не найдена страна в metadata для заказа {order_id}")
-                product_for_country = await db.get_product_by_id(product_id)
-                if product_for_country and product_for_country.country:
-                    country = product_for_country.country
+                if product and product.country:
+                    country = product.country
                 else:
                     country = settings.XUI_SERVERS[0].country if settings.XUI_SERVERS else "Unknown"
                 if country == "Unknown":
@@ -347,7 +370,6 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             )
 
             if success:
-                product = await db.get_product_by_id(product_id)
                 subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
 
                 #
