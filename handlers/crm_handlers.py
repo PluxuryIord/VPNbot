@@ -526,9 +526,32 @@ async def crm_add_days_process(message: Message, state: FSMContext, bot: Bot):
                 success = await vpn_api.update_vless_user_expiry(server_config, client_uuid, new_expiry_timestamp)
 
                 if not success:
-                    log.warning(f"CRM: Не удалось обновить срок на сервере для ключа {key_id}")
+                    log.warning(f"CRM: Не удалось обновить срок на сервере для ключа {key_id}, пробуем фолбэк")
+
+                    # Фолбэк: удалить и создать клиента заново с нужным сроком
+                    deleted = await vpn_api.delete_vless_user(server_config, client_uuid)
+                    if deleted:
+                        # Вычисляем количество дней до новой даты истечения
+                        delta_days = max(1, int((new_expires_at - datetime.datetime.now()).total_seconds() // 86400))
+
+                        # Пересоздаем клиента с новым сроком
+                        readded = await vpn_api.add_vless_user(
+                            server_config=server_config,
+                            user_id=key.user_id,
+                            days=delta_days,
+                            new_uuid=client_uuid
+                        )
+
+                        if readded:
+                            log.info(f"CRM: Клиент {client_uuid} пересоздан с новой датой на {server_config.name}")
+                        else:
+                            log.error(f"CRM: Не удалось пересоздать клиента {client_uuid} на {server_config.name}")
+                    else:
+                        log.error(f"CRM: Не удалось удалить клиента {client_uuid} для продления")
+            else:
+                log.error(f"CRM: Не найден server_config для {server_host}")
         except Exception as e:
-            log.error(f"CRM: Ошибка обновления срока на сервере: {e}")
+            log.error(f"CRM: Ошибка обновления срока на сервере: {e}", exc_info=True)
 
         # Удаляем сообщение админа с числом
         try:
@@ -675,7 +698,15 @@ async def crm_payment_process(message: Message, state: FSMContext, bot: Bot):
 
         # Отправляем счет пользователю
         try:
-            from keyboards import get_payment_method_kb
+            from keyboards import InlineKeyboardMarkup, InlineKeyboardButton
+
+            # Создаем клавиатуру для кастомного платежа (без кнопки "Назад к тарифам")
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Картой / ЮMoney / СБП", callback_data=f"pay_method:yookassa:{order_id}")],
+                    [InlineKeyboardButton(text="💎 Криптовалютой (USDT)", callback_data=f"pay_method:crypto:{order_id}")]
+                ]
+            )
 
             # Отправляем выбор способа оплаты
             await bot.send_message(
@@ -683,7 +714,7 @@ async def crm_payment_process(message: Message, state: FSMContext, bot: Bot):
                 f"💰 <b>Счет на оплату</b>\n\n"
                 f"Сумма: <b>{amount} ₽</b>\n\n"
                 "Выберите способ оплаты:",
-                reply_markup=get_payment_method_kb(order_id, back_callback_data="menu:main"),
+                reply_markup=kb,
                 parse_mode="HTML"
             )
 

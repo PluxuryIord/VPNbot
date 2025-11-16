@@ -129,26 +129,74 @@ async def add_vless_user(server_config: XuiServer, user_id: int, days: int, new_
 async def update_vless_user_expiry(server_config: XuiServer, client_id: str, new_expiry_timestamp: int) -> bool:
     """
     Обновляет срок действия (expiryTime) существующего клиента VLESS на панели.
-    Требует 3x-ui API: POST /panel/api/inbounds/updateClient/:clientId
-    Body: id (inbound id), settings (json c изменяемыми полями)
-    """
-    payload = {
-        'id': str(server_config.inbound_id),
-        'settings': json.dumps({
-            'expiryTime': new_expiry_timestamp,
-        })
-    }
+    Требует 3x-ui API: POST /panel/api/inbounds/updateClient/{client_uuid}
 
+    Сначала получает информацию о клиенте (включая email), затем обновляет срок.
+    """
     async with get_xui_client(server_config) as client:
         if client is None:
             log.error(f"[XUI_API] Client session is None for {server_config.name}, login likely failed.")
             return False
 
-        url = f"{server_config.host.rstrip('/')}/panel/api/inbounds/updateClient/{client_id}"
+        # Сначала получаем информацию о клиенте
+        list_url = f"{server_config.host.rstrip('/')}/panel/api/inbounds/list"
         try:
-            response = await client.post(url, data=payload)
+            response = await client.get(list_url)
             if response.status_code != 200:
-                log.error(f"[XUI_API] updateClient failed! Status: {response.status_code} at {url}")
+                log.error(f"[XUI_API] inbounds/list failed! Status: {response.status_code}")
+                return False
+
+            resp_data = response.json()
+            if not resp_data.get('success'):
+                log.error(f"[XUI_API] inbounds/list API returned false: {resp_data}")
+                return False
+
+            # Ищем нужный inbound
+            inbounds = resp_data.get('obj', [])
+            target_inbound = None
+
+            for inbound in inbounds:
+                if inbound.get('id') == server_config.inbound_id:
+                    target_inbound = inbound
+                    break
+
+            if not target_inbound:
+                log.error(f"[XUI_API] Inbound {server_config.inbound_id} not found on {server_config.name}")
+                return False
+
+            # Парсим настройки клиентов
+            settings_str = target_inbound.get('settings', '{}')
+            settings = json.loads(settings_str)
+            clients = settings.get('clients', [])
+
+            # Ищем клиента по UUID
+            client_data = None
+            for c in clients:
+                if c.get('id') == client_id:
+                    client_data = c
+                    break
+
+            if not client_data:
+                log.error(f"[XUI_API] Client {client_id} not found in inbound {server_config.inbound_id}")
+                return False
+
+            # Обновляем expiryTime в данных клиента
+            client_data['expiryTime'] = new_expiry_timestamp
+
+            # Формируем payload для обновления
+            payload = {
+                'id': str(server_config.inbound_id),
+                'settings': json.dumps({
+                    'clients': [client_data]
+                })
+            }
+
+            # Отправляем запрос на обновление
+            update_url = f"{server_config.host.rstrip('/')}/panel/api/inbounds/updateClient/{client_id}"
+            response = await client.post(update_url, data=payload)
+
+            if response.status_code != 200:
+                log.error(f"[XUI_API] updateClient failed! Status: {response.status_code} at {update_url}")
                 log.error(f"[XUI_API] Response: {response.text}")
                 return False
 
@@ -159,8 +207,9 @@ async def update_vless_user_expiry(server_config: XuiServer, client_id: str, new
             else:
                 log.error(f"[XUI_API] updateClient API returned false: {resp_data}")
                 return False
+
         except Exception as e:
-            log.error(f"[XUI_API] Error during updateClient to {server_config.name}: {e}")
+            log.error(f"[XUI_API] Error during updateClient to {server_config.name}: {e}", exc_info=True)
             return False
 
 
