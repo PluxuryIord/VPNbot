@@ -61,13 +61,22 @@ async def update_user_menu_id(user_id: int, message_id: int):
             await session.commit()
 
 
-async def get_products(country: str | None = None):
+async def get_products(country: str | None = None, include_custom: bool = False):
     """
     Получает список тарифов.
     Если указана страна, фильтрует по ней.
+
+    Args:
+        country: Страна для фильтрации
+        include_custom: Если True, включает "Кастомный платеж" (для CRM)
     """
     async with AsyncSessionLocal() as session:
         stmt = select(Products)
+
+        # Исключаем "Кастомный платеж" для обычных пользователей
+        if not include_custom:
+            stmt = stmt.where(Products.c.name != "Кастомный платеж")
+
         if country:
             # Фильтруем по стране ИЛИ выбираем общие тарифы (где country is NULL)
             stmt = stmt.where((Products.c.country == country) | (Products.c.country == None))
