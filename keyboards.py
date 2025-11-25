@@ -29,7 +29,9 @@ def get_main_menu_kb(user_id: int, has_keys: bool = False) -> InlineKeyboardMark
     if has_keys:
         keyboard.append([InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
 
-    keyboard.append([InlineKeyboardButton(text="🎯 Реферальная программа", callback_data="menu:referral")])
+    # Кнопка реферальной программы только для пользователей из REFERRAL_USER_IDS
+    if user_id in settings.get_referral_user_ids:
+        keyboard.append([InlineKeyboardButton(text="🎯 Реферальная программа", callback_data="menu:referral")])
 
     keyboard.append([
         InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),

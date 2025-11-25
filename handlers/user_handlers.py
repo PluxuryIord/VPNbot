@@ -911,9 +911,14 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
 @router.callback_query(F.data == "menu:referral")
 async def menu_referral(callback: CallbackQuery, bot: Bot):
     """Показывает реферальную программу и статистику"""
-    await callback.answer()
-
     user_id = callback.from_user.id
+
+    # Проверяем доступ к реферальной системе
+    if user_id not in settings.get_referral_user_ids:
+        await callback.answer("У вас нет доступа к реферальной программе.", show_alert=True)
+        return
+
+    await callback.answer()
 
     # Получаем статистику рефералов
     stats = await db.get_referral_stats(user_id)

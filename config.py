@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # --- Админы (через запятую) ---
     ADMIN_IDS: str
 
+    # --- Пользователи с доступом к реферальной системе (через запятую) ---
+    REFERRAL_USER_IDS: str = ""  # Необязательный параметр
+
     # --- CRM группа с топиками ---
     CRM_GROUP_ID: Optional[int] = None  # ID группы для CRM (с включенными топиками)
 
@@ -68,6 +71,13 @@ class Settings(BaseSettings):
     @property
     def get_admin_ids(self) -> list[int]:
         return [int(admin_id) for admin_id in self.ADMIN_IDS.split(',')]
+
+    @property
+    def get_referral_user_ids(self) -> list[int]:
+        """Возвращает список ID пользователей с доступом к реферальной системе"""
+        if not self.REFERRAL_USER_IDS or self.REFERRAL_USER_IDS.strip() == "":
+            return []
+        return [int(user_id) for user_id in self.REFERRAL_USER_IDS.split(',')]
 
 
 settings = Settings()
