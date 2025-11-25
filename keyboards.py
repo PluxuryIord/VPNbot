@@ -29,6 +29,8 @@ def get_main_menu_kb(user_id: int, has_keys: bool = False) -> InlineKeyboardMark
     if has_keys:
         keyboard.append([InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
 
+    keyboard.append([InlineKeyboardButton(text="🎯 Реферальная программа", callback_data="menu:referral")])
+
     keyboard.append([
         InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
         InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
@@ -536,3 +538,14 @@ def get_user_card_kb(page: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"admin:users_page:{page}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+
+
+def get_referral_kb() -> InlineKeyboardMarkup:
+    """Клавиатура для реферального меню"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
+        ]
+    )

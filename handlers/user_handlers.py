@@ -16,7 +16,7 @@ from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
     get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb, get_payment_method_kb, \
-    get_renewal_payment_method_kb, get_payment_success_kb, get_trial_already_used_kb
+    get_renewal_payment_method_kb, get_payment_success_kb, get_trial_already_used_kb, get_referral_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
@@ -136,6 +136,16 @@ async def cmd_start(message: Message, bot: Bot):
     except AiogramError:
         pass
 
+    # Извлекаем реферальный параметр из команды /start
+    referrer_id = None
+    if message.text and len(message.text.split()) > 1:
+        args = message.text.split()[1]
+        if args.startswith("ref"):
+            try:
+                referrer_id = int(args[3:])  # Извлекаем ID после "ref"
+            except ValueError:
+                pass
+
     last_menu_id = await db.get_or_create_user(
         user_id=message.from_user.id,
         username=message.from_user.username,
@@ -153,7 +163,17 @@ async def cmd_start(message: Message, bot: Bot):
 
         user_info = _get_user_info_for_admin(message)
         now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
-        await _notify_admins(bot, f"👤 Новый пользователь: {user_info}\n({now_str})")
+
+        # Если есть реферер, создаем запись о реферале
+        if referrer_id and referrer_id != message.from_user.id:
+            try:
+                await db.create_referral(referrer_id, message.from_user.id)
+                await _notify_admins(bot, f"👤 Новый пользователь: {user_info}\n🔗 Пришел по реферальной ссылке от ID: {referrer_id}\n({now_str})")
+            except Exception as e:
+                log.error(f"Ошибка создания реферала: {e}")
+                await _notify_admins(bot, f"👤 Новый пользователь: {user_info}\n({now_str})")
+        else:
+            await _notify_admins(bot, f"👤 Новый пользователь: {user_info}\n({now_str})")
 
     await _handle_old_menu(bot, message.from_user.id, last_menu_id)
 
@@ -885,3 +905,48 @@ async def process_check_payment(callback: CallbackQuery, bot: Bot):
 
     else:
         await callback.answer(f"Статус заказа: {order.status}. Обратитесь в поддержку.", show_alert=True)
+
+
+
+@router.callback_query(F.data == "menu:referral")
+async def menu_referral(callback: CallbackQuery, bot: Bot):
+    """Показывает реферальную программу и статистику"""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+
+    # Получаем статистику рефералов
+    stats = await db.get_referral_stats(user_id)
+    total_referrals = stats['total_referrals']
+    purchased_referrals = stats['purchased_referrals']
+
+    # Генерируем реферальную ссылку
+    bot_username = settings.BOT_USERNAME
+    referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
+
+    text = (
+        "🎯 <b>Реферальная программа</b>\n\n"
+        "Приглашайте друзей и отслеживайте статистику!\n\n"
+        "📊 <b>Ваша статистика:</b>\n"
+        f"👥 Всего приглашено: <b>{total_referrals}</b>\n"
+        f"💰 Совершили покупку: <b>{purchased_referrals}</b>\n\n"
+        "🔗 <b>Ваша реферальная ссылка:</b>\n"
+        f"<code>{referral_link}</code>\n\n"
+        "Нажмите на ссылку выше, чтобы скопировать её и поделиться с друзьями!"
+    )
+
+    try:
+        # Удаляем старое меню
+        await callback.message.delete()
+    except AiogramError as e:
+        log.info(f"Не удалось удалить сообщение в menu:referral: {e}")
+
+    # Отправляем новое меню
+    new_menu_message = await callback.message.answer(
+        text,
+        reply_markup=get_referral_kb(),
+        parse_mode="HTML"
+    )
+
+    # Сохраняем ID нового меню
+    await db.update_user_menu_id(user_id, new_menu_message.message_id)

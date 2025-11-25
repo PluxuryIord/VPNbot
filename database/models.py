@@ -27,6 +27,7 @@ Users = Table(
     Column('last_menu_id', BigInteger, nullable=True, default=None),
     Column('has_sent_trial_reminder', Boolean, nullable=False, default=False, server_default='false'),
     Column('crm_topic_id', Integer, nullable=True),  # ID топика в CRM-группе
+    Column('referrer_id', BigInteger, nullable=True),  # ID пользователя, который пригласил
 )
 
 # Таблица продуктов (тарифов)
@@ -76,4 +77,16 @@ Admins = Table(
     metadata,
     Column('user_id', BigInteger, primary_key=True, unique=True, autoincrement=False),
     Column('is_super_admin', Boolean, default=False) # На случай разных ролей
+)
+
+# Таблица реферальной статистики
+Referrals = Table(
+    'referrals',
+    metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('referrer_id', BigInteger, ForeignKey('users.user_id'), nullable=False),  # Кто пригласил
+    Column('referred_id', BigInteger, ForeignKey('users.user_id'), nullable=False),  # Кого пригласили
+    Column('created_at', DateTime, server_default=func.now()),  # Когда перешел по ссылке
+    Column('has_purchased', Boolean, nullable=False, default=False, server_default='false'),  # Купил ли что-то
+    Column('first_purchase_at', DateTime, nullable=True),  # Когда совершил первую покупку
 )

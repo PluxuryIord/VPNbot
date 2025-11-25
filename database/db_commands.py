@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, insert, update, func
-from database.models import metadata, DB_URL, Users, Products, Orders, Keys, Admins
+from database.models import metadata, DB_URL, Users, Products, Orders, Keys, Admins, Referrals
 import datetime
 
 engine = create_async_engine(
@@ -602,3 +602,111 @@ async def get_user_stats_detailed(user_id: int):
             'active_keys_count': sum(1 for k in keys if k.expires_at > now),
             'total_keys_count': len(keys)
         }
+
+
+
+# ==================== REFERRAL SYSTEM ====================
+
+async def create_referral(referrer_id: int, referred_id: int):
+    """
+    Создает запись о реферале.
+    Также обновляет поле referrer_id у приглашенного пользователя.
+    """
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Проверяем, не существует ли уже такая запись
+            existing = await session.execute(
+                select(Referrals).where(
+                    (Referrals.c.referrer_id == referrer_id) &
+                    (Referrals.c.referred_id == referred_id)
+                )
+            )
+            if existing.fetchone():
+                return  # Уже существует
+
+            # Создаем запись в таблице referrals
+            await session.execute(
+                insert(Referrals).values(
+                    referrer_id=referrer_id,
+                    referred_id=referred_id,
+                    has_purchased=False
+                )
+            )
+
+            # Обновляем поле referrer_id у пользователя
+            await session.execute(
+                update(Users)
+                .where(Users.c.user_id == referred_id)
+                .values(referrer_id=referrer_id)
+            )
+
+            await session.commit()
+
+
+async def mark_referral_purchased(referred_id: int):
+    """
+    Отмечает, что реферал совершил покупку.
+    Вызывается при первой успешной оплате.
+    """
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Находим запись реферала
+            result = await session.execute(
+                select(Referrals).where(Referrals.c.referred_id == referred_id)
+            )
+            referral = result.fetchone()
+
+            if referral and not referral.has_purchased:
+                # Обновляем статус покупки
+                await session.execute(
+                    update(Referrals)
+                    .where(Referrals.c.referred_id == referred_id)
+                    .values(
+                        has_purchased=True,
+                        first_purchase_at=datetime.datetime.now()
+                    )
+                )
+                await session.commit()
+
+
+async def get_referral_stats(user_id: int):
+    """
+    Получает статистику рефералов для пользователя.
+    Возвращает:
+    - total_referrals: общее количество приглашенных
+    - purchased_referrals: количество купивших
+    """
+    async with AsyncSessionLocal() as session:
+        # Общее количество рефералов
+        total_result = await session.execute(
+            select(func.count(Referrals.c.id))
+            .where(Referrals.c.referrer_id == user_id)
+        )
+        total_referrals = total_result.scalar() or 0
+
+        # Количество купивших
+        purchased_result = await session.execute(
+            select(func.count(Referrals.c.id))
+            .where(
+                (Referrals.c.referrer_id == user_id) &
+                (Referrals.c.has_purchased == True)
+            )
+        )
+        purchased_referrals = purchased_result.scalar() or 0
+
+        return {
+            'total_referrals': total_referrals,
+            'purchased_referrals': purchased_referrals
+        }
+
+
+async def get_user_referrer(user_id: int):
+    """
+    Получает ID реферера пользователя.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Users.c.referrer_id).where(Users.c.user_id == user_id)
+        )
+        row = result.fetchone()
+        return row.referrer_id if row else None

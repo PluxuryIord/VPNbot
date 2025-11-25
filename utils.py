@@ -372,6 +372,12 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             if success:
                 subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
 
+                # Отмечаем покупку реферала, если пользователь пришел по реферальной ссылке
+                try:
+                    await db.mark_referral_purchased(user_id)
+                except Exception as ref_e:
+                    log.error(f"Ошибка при отметке покупки реферала для user {user_id}: {ref_e}")
+
                 #
                 message_text = (
                     f"✅ <b>Оплата прошла успешно!</b>\n\n"
