@@ -503,7 +503,12 @@ async def crm_add_days_process(message: Message, state: FSMContext, bot: Bot):
 
         # Вычисляем новую дату истечения
         old_expires_at = key.expires_at
-        new_expires_at = old_expires_at + datetime.timedelta(days=days)
+        now = datetime.datetime.now()
+
+        # Если ключ уже истёк, добавляем дни к текущей дате
+        # Если ключ ещё действует, добавляем к дате истечения
+        start_date = max(now, old_expires_at)
+        new_expires_at = start_date + datetime.timedelta(days=days)
 
         # Обновляем ключ в БД
         await db.update_key_expiry(key_id, new_expires_at)
@@ -560,12 +565,17 @@ async def crm_add_days_process(message: Message, state: FSMContext, bot: Bot):
             pass
 
         # Отправляем подтверждение в топик
+        status_info = ""
+        if old_expires_at < now:
+            status_info = f"\nℹ️ Ключ был истёкшим, дни добавлены к текущей дате ({format_datetime(now)})"
+
         await message.answer(
             f"✅ <b>Дни успешно добавлены!</b>\n\n"
             f"🆔 ID ключа: <code>{key_id}</code>\n"
             f"➕ Добавлено дней: <b>{days}</b>\n"
             f"📅 Старая дата истечения: <code>{format_datetime(old_expires_at)}</code>\n"
-            f"📅 Новая дата истечения: <code>{format_datetime(new_expires_at)}</code>",
+            f"📅 Новая дата истечения: <code>{format_datetime(new_expires_at)}</code>"
+            f"{status_info}",
             parse_mode="HTML"
         )
 
@@ -583,12 +593,26 @@ async def crm_add_days_process(message: Message, state: FSMContext, bot: Bot):
                 user = result.fetchone()
 
             if user:
+                # Формируем сообщение в зависимости от того, был ли ключ истёкшим
+                if old_expires_at < now:
+                    message_text = (
+                        f"🎁 <b>Ваш ключ продлён!</b>\n\n"
+                        f"➕ Добавлено: <b>{days} дней</b>\n"
+                        f"📅 Новая дата истечения: <code>{format_datetime(new_expires_at)}</code>\n\n"
+                        f"ℹ️ Ключ был истёкшим, поэтому дни добавлены к текущей дате.\n\n"
+                        f"Приятного пользования! 🚀"
+                    )
+                else:
+                    message_text = (
+                        f"🎁 <b>Вам добавлены дни!</b>\n\n"
+                        f"➕ Добавлено: <b>{days} дней</b>\n"
+                        f"📅 Новая дата истечения: <code>{format_datetime(new_expires_at)}</code>\n\n"
+                        f"Приятного пользования! 🚀"
+                    )
+
                 await bot.send_message(
                     user.user_id,
-                    f"🎁 <b>Вам добавлены дни!</b>\n\n"
-                    f"➕ Добавлено: <b>{days} дней</b>\n"
-                    f"📅 Новая дата истечения: <code>{format_datetime(new_expires_at)}</code>\n\n"
-                    f"Приятного пользования! 🚀",
+                    message_text,
                     parse_mode="HTML"
                 )
                 log.info(f"CRM: Уведомление о добавлении дней отправлено пользователю {user.user_id}")
