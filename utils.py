@@ -253,6 +253,178 @@ async def issue_trial_key(bot: Bot, user_id: int, first_name: str = None, force:
         return None
 
 
+# Константа для реферального бонуса
+REFERRAL_BONUS_DAYS = 7
+
+
+async def issue_referral_key(bot: Bot, user_id: int, days: int) -> str | None:
+    """
+    Выдает ключ за бонусные дни реферальной программы.
+
+    Args:
+        bot: Экземпляр бота
+        user_id: ID пользователя
+        days: Количество дней
+
+    Returns:
+        subscription_url при успехе, None при ошибке
+    """
+    try:
+        # Списываем дни с баланса
+        success, remaining = await db.use_referral_balance(user_id, days)
+        if not success:
+            log.warning(f"Недостаточно бонусных дней у пользователя {user_id}")
+            return None
+
+        # Берём первый сервер Финляндии
+        finland_servers = [s for s in settings.XUI_SERVERS if s.country == "Финляндия"]
+        if not finland_servers:
+            log.error("Не найдены серверы для Финляндии")
+            # Возвращаем дни обратно
+            await db.add_referral_balance(user_id, days)
+            return None
+        server_config = finland_servers[0]
+
+        new_uuid = str(uuid.uuid4())
+        expires_at = datetime.datetime.now() + datetime.timedelta(days=days)
+
+        api_success = await vpn_api.add_vless_user(
+            server_config=server_config,
+            user_id=user_id,
+            days=days,
+            new_uuid=new_uuid
+        )
+
+        if not api_success:
+            # Возвращаем дни обратно
+            await db.add_referral_balance(user_id, days)
+            raise Exception("Failed to add user via X-UI API")
+
+        vless_string = generate_vless_key(
+            user_uuid=new_uuid,
+            product_name="Реферальный",
+            user_id=user_id,
+            server_config=server_config
+        )
+
+        subscription_token = await db.add_vless_key(
+            user_id=user_id,
+            order_id=None,
+            vless_key=vless_string,
+            expires_at=expires_at
+        )
+
+        subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
+
+        log.info(f"Реферальный ключ {new_uuid} выдан пользователю {user_id} на {days} дней")
+        return subscription_url
+
+    except Exception as e:
+        log.error(f"Ошибка выдачи реферального ключа для {user_id}: {e}")
+        return None
+
+
+async def extend_key_with_referral_bonus(user_id: int, key_id: int, days: int) -> datetime.datetime | None:
+    """
+    Продлевает ключ за бонусные дни реферальной программы.
+
+    Args:
+        user_id: ID пользователя
+        key_id: ID ключа для продления
+        days: Количество дней
+
+    Returns:
+        Новая дата истечения при успехе, None при ошибке
+    """
+    try:
+        # Списываем дни с баланса
+        success, remaining = await db.use_referral_balance(user_id, days)
+        if not success:
+            log.warning(f"Недостаточно бонусных дней у пользователя {user_id}")
+            return None
+
+        # Получаем ключ
+        key = await db.get_key_by_id(key_id)
+        if not key or key.user_id != user_id:
+            # Возвращаем дни обратно
+            await db.add_referral_balance(user_id, days)
+            return None
+
+        # Вычисляем новую дату
+        now = datetime.datetime.now()
+        start_date = max(now, key.expires_at)
+        new_expiry = start_date + datetime.timedelta(days=days)
+
+        # Обновляем в БД
+        await db.update_key_expiry(key_id, new_expiry)
+
+        # Синхронизируем на панели X-UI
+        try:
+            vless_key_str = key.vless_key or ""
+            client_uuid = vless_key_str.split('vless://')[1].split('@')[0]
+            server_host = vless_key_str.split('@')[1].split(':')[0]
+            server_config = next((s for s in settings.XUI_SERVERS if s.vless_server == server_host), None)
+
+            if server_config:
+                new_expiry_ts = int(new_expiry.timestamp() * 1000)
+                updated = await vpn_api.update_vless_user_expiry(server_config, client_uuid, new_expiry_ts)
+                if not updated:
+                    # Фолбэк: пересоздаём клиента
+                    await vpn_api.delete_vless_user(server_config, client_uuid)
+                    delta_days = max(1, int((new_expiry - datetime.datetime.now()).total_seconds() // 86400))
+                    await vpn_api.add_vless_user(server_config, user_id=user_id, days=delta_days, new_uuid=client_uuid)
+        except Exception as sync_e:
+            log.error(f"Ошибка синхронизации продления на панели: {sync_e}")
+
+        log.info(f"Ключ {key_id} продлён на {days} дней за бонусы. Новая дата: {new_expiry}")
+        return new_expiry
+
+    except Exception as e:
+        log.error(f"Ошибка продления ключа за бонусы для {user_id}: {e}")
+        return None
+
+
+async def process_referral_bonus(bot: Bot, referrer_id: int, referred_id: int) -> bool:
+    """
+    Начисляет бонусные дни на баланс реферера за первую покупку реферала.
+
+    Args:
+        bot: Экземпляр бота для отправки уведомления
+        referrer_id: ID реферера (кто пригласил)
+        referred_id: ID реферала (кто купил)
+
+    Returns:
+        True если бонус начислен
+    """
+    try:
+        # Начисляем бонусные дни на баланс
+        new_balance = await db.add_referral_balance(referrer_id, REFERRAL_BONUS_DAYS)
+
+        notification_text = (
+            f"🎉 <b>Реферальный бонус!</b>\n\n"
+            f"Ваш друг совершил первую покупку!\n\n"
+            f"🎁 Вам начислено: <b>+{REFERRAL_BONUS_DAYS} дней</b>\n"
+            f"💰 Ваш баланс: <b>{new_balance} дней</b>\n\n"
+            f"Используйте бонусные дни для покупки или продления подписки в меню реферальной программы!"
+        )
+
+        try:
+            await bot.send_message(
+                referrer_id,
+                notification_text,
+                parse_mode="HTML"
+            )
+            log.info(f"Реферальный бонус +{REFERRAL_BONUS_DAYS} дней начислен на баланс пользователя {referrer_id} за реферала {referred_id}. Новый баланс: {new_balance}")
+        except Exception as send_e:
+            log.warning(f"Не удалось отправить уведомление о бонусе пользователю {referrer_id}: {send_e}")
+
+        return True
+
+    except Exception as e:
+        log.error(f"Ошибка начисления реферального бонуса для {referrer_id}: {e}")
+        return False
+
+
 async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple[bool, str, str | None]:
     """
     Универсальная логика обработки УСПЕШНОГО платежа (и ЮKassa, и Crypto).
@@ -372,13 +544,15 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
             if success:
                 subscription_url = f"{settings.WEBHOOK_HOST}/sub/{subscription_token}"
 
-                # Отмечаем покупку реферала, если пользователь пришел по реферальной ссылке
+                # Обрабатываем реферальный бонус
                 try:
-                    await db.mark_referral_purchased(user_id)
+                    referrer_id = await db.mark_referral_purchased(user_id)
+                    if referrer_id:
+                        # Это первая покупка реферала - начисляем бонус рефереру
+                        await process_referral_bonus(bot, referrer_id, user_id)
                 except Exception as ref_e:
-                    log.error(f"Ошибка при отметке покупки реферала для user {user_id}: {ref_e}")
+                    log.error(f"Ошибка при обработке реферального бонуса для user {user_id}: {ref_e}")
 
-                #
                 message_text = (
                     f"✅ <b>Оплата прошла успешно!</b>\n\n"
                     f"Ваш ключ 👇👇👇\n\n"
@@ -386,7 +560,7 @@ async def handle_payment_logic(bot: Bot, order_id: int, metadata: dict) -> tuple
                     f"1. Нажмите на ключ 👆👆👆, чтобы скопировать его\n"
                     f"2. Выберите тип устройства"
                 )
-                return True, message_text, "new_key"  #
+                return True, message_text, "new_key"
             else:
                 message_text = (
                     "❌ **Ошибка выдачи ключа**\n\n"

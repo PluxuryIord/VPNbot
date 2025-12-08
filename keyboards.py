@@ -1,7 +1,7 @@
 import datetime
 import math
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from config import settings
 
@@ -27,11 +27,19 @@ def get_main_menu_kb(user_id: int, has_keys: bool = False) -> InlineKeyboardMark
     ]
 
     if has_keys:
+        # Web App кнопка для просмотра ключей
+        # webapp_url = f"{settings.WEBHOOK_HOST}/webapp/index.html"
+        # keyboard.append([
+        #     InlineKeyboardButton(
+        #         text="📱 Мой профиль (Web App)",
+        #         web_app=WebAppInfo(url=webapp_url)
+        #     )
+        # ])
+        # Старая кнопка для совместимости
         keyboard.append([InlineKeyboardButton(text="📖 Мои ключи", callback_data="menu:keys")])
 
-    # Кнопка реферальной программы только для пользователей из REFERRAL_USER_IDS
-    if user_id in settings.get_referral_user_ids:
-        keyboard.append([InlineKeyboardButton(text="🎯 Реферальная программа", callback_data="menu:referral")])
+    # Кнопка реферальной программы для всех пользователей
+    keyboard.append([InlineKeyboardButton(text="🎯 Реферальная программа", callback_data="menu:referral")])
 
     keyboard.append([
         InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:instruction"),
@@ -544,10 +552,37 @@ def get_user_card_kb(page: int) -> InlineKeyboardMarkup:
 
 
 
-def get_referral_kb() -> InlineKeyboardMarkup:
+def get_referral_kb(balance: int = 0) -> InlineKeyboardMarkup:
     """Клавиатура для реферального меню"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")]
-        ]
-    )
+    buttons = []
+
+    # Показываем кнопку использования баланса только если есть дни
+    if balance >= 7:
+        buttons.append([InlineKeyboardButton(text="🎁 Использовать бонусы", callback_data="referral:use_bonus")])
+
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_referral_use_bonus_kb(balance: int, has_active_key: bool) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора действия с бонусами"""
+    buttons = []
+
+    # Новый ключ на 7 дней
+    if balance >= 7:
+        buttons.append([InlineKeyboardButton(
+            text=f"🆕 Новый ключ (7 дней)",
+            callback_data="referral:new_key:7"
+        )])
+
+    # Продление на 7 дней (только если есть активный ключ)
+    if has_active_key and balance >= 7:
+        buttons.append([InlineKeyboardButton(
+            text=f"⏰ Продлить ключ (+7 дней)",
+            callback_data="referral:extend:7"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:referral")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

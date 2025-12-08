@@ -16,7 +16,8 @@ from utils import issue_key_to_user, issue_trial_key
 
 from keyboards import get_main_menu_kb, get_payment_kb, get_instruction_platforms_kb, get_back_to_instructions_kb, \
     get_country_selection_kb, get_my_keys_kb, get_key_details_kb, get_support_kb, get_payment_method_kb, \
-    get_renewal_payment_method_kb, get_payment_success_kb, get_trial_already_used_kb, get_referral_kb
+    get_renewal_payment_method_kb, get_payment_success_kb, get_trial_already_used_kb, get_referral_kb, \
+    get_referral_use_bonus_kb
 from database import db_commands as db
 from payments import create_yookassa_payment, check_yookassa_payment
 from utils import generate_vless_key, handle_payment_logic
@@ -913,17 +914,15 @@ async def menu_referral(callback: CallbackQuery, bot: Bot):
     """Показывает реферальную программу и статистику"""
     user_id = callback.from_user.id
 
-    # Проверяем доступ к реферальной системе
-    if user_id not in settings.get_referral_user_ids:
-        await callback.answer("У вас нет доступа к реферальной программе.", show_alert=True)
-        return
-
     await callback.answer()
 
-    # Получаем статистику рефералов
+    # Получаем статистику рефералов и баланс
     stats = await db.get_referral_stats(user_id)
     total_referrals = stats['total_referrals']
     purchased_referrals = stats['purchased_referrals']
+
+    # Получаем бонусный баланс
+    balance = await db.get_referral_balance(user_id)
 
     # Генерируем реферальную ссылку
     bot_username = settings.BOT_USERNAME
@@ -931,13 +930,14 @@ async def menu_referral(callback: CallbackQuery, bot: Bot):
 
     text = (
         "🎯 <b>Реферальная программа</b>\n\n"
-        "Приглашайте друзей и отслеживайте статистику!\n\n"
+        "Приглашайте друзей и получайте <b>+7 дней</b> на баланс за каждую их покупку!\n\n"
         "📊 <b>Ваша статистика:</b>\n"
         f"👥 Всего приглашено: <b>{total_referrals}</b>\n"
         f"💰 Совершили покупку: <b>{purchased_referrals}</b>\n\n"
+        f"💎 <b>Ваш баланс: {balance} дней</b>\n\n"
         "🔗 <b>Ваша реферальная ссылка:</b>\n"
         f"<code>{referral_link}</code>\n\n"
-        "Нажмите на ссылку выше, чтобы скопировать её и поделиться с друзьями!"
+        "Нажмите на ссылку, чтобы скопировать и поделиться с друзьями!"
     )
 
     try:
@@ -949,9 +949,140 @@ async def menu_referral(callback: CallbackQuery, bot: Bot):
     # Отправляем новое меню
     new_menu_message = await callback.message.answer(
         text,
-        reply_markup=get_referral_kb(),
+        reply_markup=get_referral_kb(balance),
         parse_mode="HTML"
     )
 
     # Сохраняем ID нового меню
     await db.update_user_menu_id(user_id, new_menu_message.message_id)
+
+
+@router.callback_query(F.data == "referral:use_bonus")
+async def referral_use_bonus(callback: CallbackQuery):
+    """Показывает меню использования бонусов"""
+    user_id = callback.from_user.id
+
+    await callback.answer()
+
+    # Получаем баланс и проверяем наличие активных ключей
+    balance = await db.get_referral_balance(user_id)
+    keys = await db.get_user_keys(user_id)
+
+    now = datetime.datetime.now()
+    has_active_key = any(k.expires_at > now for k in keys)
+
+    if balance < 7:
+        await callback.answer("Недостаточно бонусных дней!", show_alert=True)
+        return
+
+    text = (
+        "🎁 <b>Использование бонусов</b>\n\n"
+        f"💎 Ваш баланс: <b>{balance} дней</b>\n\n"
+        "Выберите действие:"
+    )
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_referral_use_bonus_kb(balance, has_active_key),
+            parse_mode="HTML"
+        )
+    except AiogramError:
+        await callback.message.delete()
+        await callback.message.answer(
+            text,
+            reply_markup=get_referral_use_bonus_kb(balance, has_active_key),
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("referral:new_key:"))
+async def referral_new_key(callback: CallbackQuery, bot: Bot):
+    """Выдаёт новый ключ за бонусные дни"""
+    from utils import issue_referral_key
+
+    user_id = callback.from_user.id
+    days = int(callback.data.split(":")[-1])
+
+    await callback.answer("⏳ Создаём ключ...")
+
+    subscription_url = await issue_referral_key(bot, user_id, days)
+
+    if subscription_url:
+        text = (
+            f"✅ <b>Ключ успешно создан!</b>\n\n"
+            f"Срок действия: <b>{days} дней</b>\n\n"
+            f"Ваш ключ 👇👇👇\n\n"
+            f"<code>{subscription_url}</code>\n\n"
+            f"Нажмите на ключ, чтобы скопировать его."
+        )
+    else:
+        text = (
+            "❌ <b>Ошибка</b>\n\n"
+            "Не удалось создать ключ. Попробуйте позже или обратитесь в поддержку."
+        )
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_referral_kb(await db.get_referral_balance(user_id)),
+            parse_mode="HTML"
+        )
+    except AiogramError:
+        await callback.message.delete()
+        await callback.message.answer(
+            text,
+            reply_markup=get_referral_kb(await db.get_referral_balance(user_id)),
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("referral:extend:"))
+async def referral_extend_key(callback: CallbackQuery, bot: Bot):
+    """Продлевает ключ за бонусные дни"""
+    from utils import extend_key_with_referral_bonus
+
+    user_id = callback.from_user.id
+    days = int(callback.data.split(":")[-1])
+
+    # Находим активный ключ для продления
+    keys = await db.get_user_keys(user_id)
+    now = datetime.datetime.now()
+    active_keys = [k for k in keys if k.expires_at > now]
+
+    if not active_keys:
+        await callback.answer("У вас нет активных ключей для продления!", show_alert=True)
+        return
+
+    # Берём ключ с самым поздним сроком
+    key_to_extend = max(active_keys, key=lambda k: k.expires_at)
+
+    await callback.answer("⏳ Продлеваем ключ...")
+
+    new_expiry = await extend_key_with_referral_bonus(user_id, key_to_extend.id, days)
+
+    if new_expiry:
+        text = (
+            f"✅ <b>Ключ успешно продлён!</b>\n\n"
+            f"Добавлено: <b>+{days} дней</b>\n"
+            f"Новый срок действия: <b>{new_expiry.strftime('%d.%m.%Y')}</b>"
+        )
+    else:
+        text = (
+            "❌ <b>Ошибка</b>\n\n"
+            "Не удалось продлить ключ. Попробуйте позже или обратитесь в поддержку."
+        )
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_referral_kb(await db.get_referral_balance(user_id)),
+            parse_mode="HTML"
+        )
+    except AiogramError:
+        await callback.message.delete()
+        await callback.message.answer(
+            text,
+            reply_markup=get_referral_kb(await db.get_referral_balance(user_id)),
+            parse_mode="HTML"
+        )

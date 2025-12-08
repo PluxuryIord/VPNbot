@@ -583,6 +583,7 @@ async def get_user_stats_detailed(user_id: int):
                 Keys.c.created_at,
                 Keys.c.expires_at,
                 Keys.c.order_id,
+                Keys.c.subscription_token,
                 Products.c.name.label("product_name"),
                 Products.c.duration_days
             )
@@ -643,10 +644,14 @@ async def create_referral(referrer_id: int, referred_id: int):
             await session.commit()
 
 
-async def mark_referral_purchased(referred_id: int):
+async def mark_referral_purchased(referred_id: int) -> int | None:
     """
     Отмечает, что реферал совершил покупку.
-    Вызывается при первой успешной оплате.
+    Вызывается при каждой успешной оплате.
+
+    Returns:
+        referrer_id если это первая покупка реферала (для начисления бонуса),
+        None если реферала нет или он уже покупал ранее
     """
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -657,7 +662,7 @@ async def mark_referral_purchased(referred_id: int):
             referral = result.fetchone()
 
             if referral and not referral.has_purchased:
-                # Обновляем статус покупки
+                # Первая покупка реферала - обновляем статус и возвращаем referrer_id
                 await session.execute(
                     update(Referrals)
                     .where(Referrals.c.referred_id == referred_id)
@@ -667,6 +672,9 @@ async def mark_referral_purchased(referred_id: int):
                     )
                 )
                 await session.commit()
+                return referral.referrer_id  # Возвращаем ID реферера для начисления бонуса
+
+            return None  # Реферала нет или уже покупал
 
 
 async def get_referral_stats(user_id: int):
@@ -710,3 +718,131 @@ async def get_user_referrer(user_id: int):
         )
         row = result.fetchone()
         return row.referrer_id if row else None
+
+
+async def add_referral_bonus_days(referrer_id: int, bonus_days: int = 7) -> dict | None:
+    """
+    Начисляет бонусные дни к активному ключу реферера.
+
+    Args:
+        referrer_id: ID пользователя-реферера
+        bonus_days: Количество бонусных дней (по умолчанию 7)
+
+    Returns:
+        dict с информацией о продлённом ключе или None если нет активных ключей
+    """
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            now = datetime.datetime.now()
+
+            # Находим активный ключ реферера (срок действия ещё не истёк)
+            result = await session.execute(
+                select(Keys)
+                .where(
+                    (Keys.c.user_id == referrer_id) &
+                    (Keys.c.expires_at > now)
+                )
+                .order_by(Keys.c.expires_at.desc())  # Берём ключ с самым поздним сроком
+                .limit(1)
+            )
+            key = result.fetchone()
+
+            if not key:
+                return None  # У реферера нет активных ключей
+
+            # Продлеваем ключ на bonus_days
+            new_expiry = key.expires_at + datetime.timedelta(days=bonus_days)
+
+            await session.execute(
+                update(Keys)
+                .where(Keys.c.id == key.id)
+                .values(expires_at=new_expiry)
+            )
+            await session.commit()
+
+            return {
+                'key_id': key.id,
+                'old_expiry': key.expires_at,
+                'new_expiry': new_expiry,
+                'bonus_days': bonus_days
+            }
+
+
+async def get_referral_balance(user_id: int) -> int:
+    """
+    Получает бонусный баланс пользователя (в днях).
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Users.c.referral_balance).where(Users.c.user_id == user_id)
+        )
+        row = result.fetchone()
+        return row.referral_balance if row else 0
+
+
+async def add_referral_balance(user_id: int, days: int) -> int:
+    """
+    Добавляет дни к бонусному балансу пользователя.
+
+    Args:
+        user_id: ID пользователя
+        days: Количество дней для добавления
+
+    Returns:
+        Новый баланс
+    """
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Получаем текущий баланс
+            result = await session.execute(
+                select(Users.c.referral_balance).where(Users.c.user_id == user_id)
+            )
+            row = result.fetchone()
+            current_balance = row.referral_balance if row else 0
+            new_balance = current_balance + days
+
+            # Обновляем баланс
+            await session.execute(
+                update(Users)
+                .where(Users.c.user_id == user_id)
+                .values(referral_balance=new_balance)
+            )
+            await session.commit()
+
+            return new_balance
+
+
+async def use_referral_balance(user_id: int, days: int) -> tuple[bool, int]:
+    """
+    Списывает дни с бонусного баланса пользователя.
+
+    Args:
+        user_id: ID пользователя
+        days: Количество дней для списания
+
+    Returns:
+        (успех, остаток баланса)
+    """
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Получаем текущий баланс
+            result = await session.execute(
+                select(Users.c.referral_balance).where(Users.c.user_id == user_id)
+            )
+            row = result.fetchone()
+            current_balance = row.referral_balance if row else 0
+
+            if current_balance < days:
+                return False, current_balance  # Недостаточно дней
+
+            new_balance = current_balance - days
+
+            # Обновляем баланс
+            await session.execute(
+                update(Users)
+                .where(Users.c.user_id == user_id)
+                .values(referral_balance=new_balance)
+            )
+            await session.commit()
+
+            return True, new_balance

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import scheduler_tasks
+from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -9,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from config import settings
 from database import db_commands as db
-from handlers import user_handlers, admin_handlers, webhook_handlers, crm_handlers
+from handlers import user_handlers, admin_handlers, webhook_handlers, crm_handlers, webapp_handlers
 from middlewares.crm_filter import CRMFilterMiddleware
 
 TELEGRAM_WEBHOOK_PATH = "/webhook/telegram"
@@ -111,6 +112,14 @@ async def main():
     app.router.add_post(YOOKASSA_WEBHOOK_PATH, webhook_handlers.yookassa_webhook_handler)
     app.router.add_post(settings.CRYPTO_BOT_WEBHOOK_PATH, webhook_handlers.crypto_bot_webhook_handler)
     app.router.add_get("/sub/{token}", webhook_handlers.subscription_handler)
+
+    # # Web App API endpoints
+    # app.router.add_get("/api/webapp/health", webapp_handlers.webapp_health_check)
+    # app.router.add_get("/api/webapp/user", webapp_handlers.webapp_get_user_info)
+    #
+    # # Статические файлы для Web App
+    # webapp_dir = Path(__file__).parent / "webapp"
+    # app.router.add_static("/webapp", webapp_dir, name="webapp")
 
     # Связываем aiohttp приложение с диспетчером aiogram
     setup_application(app, dp, bot=bot)

@@ -28,6 +28,7 @@ Users = Table(
     Column('has_sent_trial_reminder', Boolean, nullable=False, default=False, server_default='false'),
     Column('crm_topic_id', Integer, nullable=True),  # ID топика в CRM-группе
     Column('referrer_id', BigInteger, nullable=True),  # ID пользователя, который пригласил
+    Column('referral_balance', Integer, nullable=False, default=0, server_default='0'),  # Бонусные дни за рефералов
 )
 
 # Таблица продуктов (тарифов)
